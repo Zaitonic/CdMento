@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+*.local
+.venv/
+__pycache__/
+.pytest_cache/
+backend/data/
+*.pyc
+firebase-service-account*.json
+
+# Generated output and tool caches
+build/
+.cache/
+.ruff_cache/
+artifacts/

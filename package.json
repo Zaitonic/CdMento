@@ -1,0 +1,54 @@
+{
+  "name": "cdmento",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "dev": "vite --config frontend/vite.config.ts",
+    "server": "node scripts/run-backend.mjs",
+    "dev:all": "concurrently -k \"npm:dev\" \"npm:server\"",
+    "build": "tsc --project frontend/tsconfig.json --noEmit && vite build --config frontend/vite.config.ts",
+    "preview": "vite preview --config frontend/vite.config.ts",
+    "test:backend": "node scripts/run-python.mjs -m pytest backend/tests -q",
+    "test": "vitest run --config frontend/vitest.config.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@tiptap/react": "^3.32.0",
+    "@tiptap/starter-kit": "^3.32.0",
+    "@xyflow/react": "^12.12.0",
+    "firebase": "^13.1.0",
+    "lucide-react": "^1.61.0",
+    "motion": "^14.6.0",
+    "pdfjs-dist": "^6.4.299",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-hook-form": "^7.90.0",
+    "react-router-dom": "^7.18.4",
+    "sonner": "^2.0.8",
+    "zod": "^4.6.7",
+    "zustand": "^5.0.16"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "concurrently": "^10.0.6",
+    "jsdom": "^30.1.3",
+    "prettier": "^3.9.10",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.13.6"
+  }
+}
