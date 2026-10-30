@@ -5,7 +5,9 @@ dist/
 .venv/
 __pycache__/
 .pytest_cache/
-backend/data/
+backend/data/uploads/
+backend/data/*.sqlite3-shm
+backend/data/*.sqlite3-wal
 *.pyc
 firebase-service-account*.json
 
