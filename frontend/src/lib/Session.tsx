@@ -40,8 +40,16 @@ type GoogleProfile = {
   emailVerified: true;
   kind: "google";
 };
+type PasswordProfile = {
+  uid: string;
+  email: string;
+  displayName: string;
+  emailVerified: boolean;
+  kind: "password";
+};
 const DEMO_KEY = "cdmento-demo-token";
 const GOOGLE_KEY = "cdmento-google-token";
+const PASSWORD_KEY = "cdmento-password-token";
 function savedDemoToken() {
   try {
     return (
@@ -76,9 +84,26 @@ function clearGoogleStorage() {
     /* Storage can be unavailable. */
   }
 }
+function savedPasswordToken() {
+  try {
+    return (
+      sessionStorage.getItem(PASSWORD_KEY) || localStorage.getItem(PASSWORD_KEY) || ""
+    );
+  } catch {
+    return "";
+  }
+}
+function clearPasswordStorage() {
+  try {
+    sessionStorage.removeItem(PASSWORD_KEY);
+    localStorage.removeItem(PASSWORD_KEY);
+  } catch {
+    /* Storage can be unavailable. */
+  }
+}
 const Session = createContext({
-  user: null as User | GoogleProfile | null,
-  provider: "" as "firebase" | "google" | "",
+  user: null as User | GoogleProfile | PasswordProfile | null,
+  provider: "" as "firebase" | "google" | "password" | "",
   demo: null as DemoProfile | null,
   loading: true,
   account: null as AccountProfile | null,
@@ -93,14 +118,15 @@ const Session = createContext({
     _remember: boolean,
   ) => {},
   loginGoogle: async (_credential: string, _remember: boolean) => {},
+  loginPassword: async (_email: string, _password: string, _remember: boolean) => {},
 });
 export const useSession = () => useContext(Session);
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | GoogleProfile | null>(null);
-  const [provider, setProvider] = useState<"firebase" | "google" | "">("");
+  const [user, setUser] = useState<User | GoogleProfile | PasswordProfile | null>(null);
+  const [provider, setProvider] = useState<"firebase" | "google" | "password" | "">("");
   const [demo, setDemo] = useState<DemoProfile | null>(null);
   const [loading, setLoading] = useState(
-    !!firebaseAuth || !!savedDemoToken() || !!savedGoogleToken(),
+    !!firebaseAuth || !!savedDemoToken() || !!savedGoogleToken() || !!savedPasswordToken(),
   );
   const [account, setAccount] = useState<AccountProfile | null>(null);
   const [accountError, setAccountError] = useState("");
@@ -158,6 +184,34 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           .catch(() => {
             if (!active || epoch !== demoVersion.current) return;
             clearGoogleStorage();
+            setToken("");
+            setUser(null);
+            setProvider("");
+            useStore.getState().clearSession();
+          })
+          .finally(() => {
+            if (active && epoch === demoVersion.current) setLoading(false);
+          });
+        return () => {
+          active = false;
+        };
+      }
+      const passwordToken = savedPasswordToken();
+      if (passwordToken) {
+        let active = true;
+        const epoch = ++demoVersion.current;
+        setToken(passwordToken);
+        api<PasswordProfile>("/auth/email/session", { method: "POST" })
+          .then((profile) => {
+            if (!active || epoch !== demoVersion.current) return;
+            if (useStore.getState().owner !== profile.uid)
+              useStore.getState().clearSession();
+            setUser(profile);
+            setProvider("password");
+          })
+          .catch(() => {
+            if (!active || epoch !== demoVersion.current) return;
+            clearPasswordStorage();
             setToken("");
             setUser(null);
             setProvider("");
@@ -236,6 +290,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setUser(await api<GoogleProfile>("/auth/google/session"));
       return;
     }
+    if (provider === "password") {
+      setUser(await api<PasswordProfile>("/auth/email/session", { method: "POST" }));
+      return;
+    }
     if (!firebaseAuth?.currentUser) return;
     await firebaseAuth.currentUser.reload();
     setToken(await firebaseAuth.currentUser.getIdToken(true));
@@ -252,6 +310,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     } else if (provider === "google") {
       await api("/auth/google/logout", { method: "POST" });
       clearGoogleStorage();
+    } else if (provider === "password") {
+      await api("/auth/email/logout", { method: "POST" });
+      clearPasswordStorage();
     } else if (firebaseAuth) await signOut(firebaseAuth);
     setToken("");
     useStore.getState().clearSession();
@@ -271,6 +332,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (epoch !== demoVersion.current) return;
     useStore.getState().clearSession();
     clearDemoStorage();
+    clearPasswordStorage();
     try {
       (remember ? localStorage : sessionStorage).setItem(
         DEMO_KEY,
@@ -291,6 +353,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     useStore.getState().clearSession();
     clearDemoStorage();
     clearGoogleStorage();
+    clearPasswordStorage();
     try {
       (remember ? localStorage : sessionStorage).setItem(
         GOOGLE_KEY,
@@ -305,6 +368,26 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setProvider("google");
     setLoading(false);
   }
+  async function loginPassword(email: string, password: string, remember: boolean) {
+    const result = await api<{ token: string; profile: PasswordProfile }>(
+      "/auth/email/login",
+      { method: "POST", body: json({ email, password, remember }) },
+    );
+    useStore.getState().clearSession();
+    clearDemoStorage();
+    clearGoogleStorage();
+    clearPasswordStorage();
+    try {
+      (remember ? localStorage : sessionStorage).setItem(PASSWORD_KEY, result.token);
+    } catch {
+      /* Current-session sign-in works without storage. */
+    }
+    setToken(result.token);
+    setDemo(null);
+    setUser(result.profile);
+    setProvider("password");
+    setLoading(false);
+  }
   return (
     <Session.Provider
       value={{
@@ -316,6 +399,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         logout,
         loginDemo,
         loginGoogle,
+        loginPassword,
         account,
         accountError,
         saveAccount,

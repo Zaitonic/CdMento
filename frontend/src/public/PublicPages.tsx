@@ -51,7 +51,7 @@ import {
   type UserCredential,
 } from "firebase/auth";
 import { firebaseAuth } from "../lib/auth";
-import { api, ApiError } from "../lib/api";
+import { api, ApiError, json } from "../lib/api";
 import { useSession } from "../lib/Session";
 import { safeNext } from "../lib/paths";
 import { FlashcardDemo, QuizDemo } from "./ProgrammingDemos";
@@ -741,7 +741,7 @@ function AuthShell({ children }: { children: ReactNode }) {
 const offlineMessage =
   "Account services are not connected yet. Please try again later.";
 export function authError(error: unknown) {
-  if (error instanceof ApiError && [401, 429].includes(error.status))
+  if (error instanceof ApiError)
     return error.message;
   const code = (error as { code?: string })?.code;
   if (
@@ -866,7 +866,7 @@ function PasswordField({
   );
 }
 export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
-  const { user, demo, loading, loginDemo, loginGoogle } = useSession();
+  const { user, demo, loading, loginDemo, loginGoogle, loginPassword } = useSession();
   const accountUser = user || demo;
   const navigate = useNavigate();
   const location = useLocation();
@@ -945,6 +945,27 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
     try {
       if (demoAvailable && !signup && !reset) {
         await loginDemo(email.trim(), password, remember);
+        navigate(next, { replace: true });
+        return;
+      }
+      if (googleMode) {
+        if (signup) {
+          await api("/auth/email/signup", {
+            method: "POST",
+            body: json({ email: email.trim(), password, display_name: name.trim() }),
+          });
+          setSent(true);
+          return;
+        }
+        if (reset) {
+          await api("/auth/email/password-reset/request", {
+            method: "POST",
+            body: json({ email: email.trim() }),
+          });
+          setSent(true);
+          return;
+        }
+        await loginPassword(email.trim(), password, remember);
         navigate(next, { replace: true });
         return;
       }
@@ -1081,14 +1102,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
               ? "Create your own space to learn, practice, and grow."
               : "A fresh perspective is just a sign-in away."}
         </p>
-        {googleMode && reset ? (
-          <div className="auth-success" role="status">
-            <p>Your account uses Google sign-in. CdMento does not manage your Google password.</p>
-            <a className="pub-button" href="https://accounts.google.com/signin/recovery" target="_blank" rel="noreferrer">
-              Recover your Google account <ArrowRight size={16} />
-            </a>
-          </div>
-        ) : !signInReady ? (
+        {!signInReady ? (
           <div className="auth-notice" role="status">
             <p>
               {authMode === "checking"
@@ -1110,44 +1124,35 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
         ) : sent ? (
           <div className="auth-success" role="status">
             <CheckCircle2 />
-            <h3>Check your inbox.</h3>
+            <h3>{signup ? "Verify your email." : "Check your inbox."}</h3>
             <p>
-              If an account exists for {email}, you’ll receive a link to reset
-              your password. Check your spam folder too.
+              {signup
+                ? `We sent a verification link to ${email}. Open it before logging in.`
+                : `If an account exists for ${email}, you’ll receive a password reset link. Check your spam folder too.`}
             </p>
             <Link className="pub-button" to={`/login${suffix}`}>
               Back to log in <ArrowRight size={16} />
             </Link>
           </div>
         ) : (
-          googleMode ? (
-            <div className="auth-form" key={location.pathname}>
-              {error && <p className="auth-error" role="alert">{error}</p>}
-              {busy ? (
-                <p className="auth-notice" role="status"><LoaderCircle className="loading-spin" size={18} /> Signing in…</p>
-              ) : (
-                <GoogleSignInButton
-                  onCredential={handleGoogleCredential}
-                  onError={setError}
-                />
-              )}
-              <label className="auth-form-options">
-                <input
-                  type="checkbox"
-                  checked={remember}
-                  onChange={(e) => setRemember(e.target.checked)}
-                />{" "}
-                Keep me signed in
-              </label>
-            </div>
-          ) : <form onSubmit={submit} className="auth-form" key={location.pathname}>
-            {demoAvailable && (
-              <div className="auth-notice" role="status">
-                Local demo account · your workspace is saved on this computer.
+          <>
+            {!reset && googleMode && (
+              <div className="auth-provider-option">
+                {busy ? (
+                  <p className="auth-notice" role="status"><LoaderCircle className="loading-spin" size={18} /> Signing in…</p>
+                ) : (
+                  <GoogleSignInButton
+                    onCredential={handleGoogleCredential}
+                    onError={setError}
+                  />
+                )}
+                <div className="auth-divider" role="separator" aria-label="or">
+                  <span>or continue with email</span>
+                </div>
               </div>
             )}
             {!reset && firebaseMode && (
-              <>
+              <div className="auth-provider-option">
                 <button
                   type="button"
                   className="auth-google-btn"
@@ -1161,7 +1166,16 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
                 <div className="auth-divider" role="separator" aria-label="or">
                   <span>or continue with email</span>
                 </div>
-              </>
+              </div>
+            )}
+            {reset && googleMode && (
+              <p className="auth-notice">If you use Google to sign in, choose Continue with Google on the login page.</p>
+            )}
+            <form onSubmit={submit} className="auth-form" key={location.pathname}>
+            {demoAvailable && (
+              <div className="auth-notice" role="status">
+                Local demo account · your workspace is saved on this computer.
+              </div>
             )}
             {signup && (
               <label className="auth-label" htmlFor="full-name">
@@ -1260,7 +1274,8 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
                 </>
               )}
             </button>
-          </form>
+            </form>
+          </>
         )}
         <p className="auth-switch">
           {reset ? (
@@ -1289,6 +1304,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
 }
 export function VerifyPage() {
   const { user, loading, refresh, logout } = useSession();
+  const firebaseUser = user && "getIdToken" in user ? user : null;
   const [params] = useSearchParams();
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
@@ -1304,8 +1320,8 @@ export function VerifyPage() {
         Checking your account…
       </div>
     );
-  if (!user) return <Navigate to="/login" replace />;
-  if (user.emailVerified)
+  if (!firebaseUser) return <Navigate to="/login" replace />;
+  if (firebaseUser.emailVerified)
     return <Navigate to={safeNext(params.get("next"))} replace />;
   return (
     <AuthShell>
@@ -1316,7 +1332,7 @@ export function VerifyPage() {
         <span className="eyebrow">ONE LITTLE STEP LEFT</span>
         <h1>Check your inbox.</h1>
         <p className="auth-description">
-          Open the verification email sent to <strong>{user.email}</strong>,
+          Open the verification email sent to <strong>{firebaseUser.email}</strong>,
           then come back here. Check your spam folder if you don’t see it.
         </p>
         <div className="auth-form">
@@ -1328,7 +1344,7 @@ export function VerifyPage() {
               setMessage("");
               try {
                 await refresh();
-                if (!firebaseAuth?.currentUser?.emailVerified)
+                if (!firebaseUser.emailVerified)
                   setMessage(
                     "Your email hasn’t been verified yet. Open the link in your email first.",
                   );
@@ -1347,7 +1363,7 @@ export function VerifyPage() {
             onClick={async () => {
               setBusy(true);
               try {
-                await sendEmailVerification(user, {
+                await sendEmailVerification(firebaseUser, {
                   url: window.location.origin + "/verify-email",
                 });
                 setCooldown(60);
@@ -1379,14 +1395,15 @@ export function VerifyPage() {
 export function ActionPage() {
   const [params] = useSearchParams();
   const mode = params.get("mode"),
-    code = params.get("oobCode") || "";
+    code = params.get("oobCode") || "",
+    token = params.get("token") || "";
   const [password, setPassword] = useState(""),
     [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false),
     [done, setDone] = useState(false),
     [error, setError] = useState("");
   const { refresh } = useSession();
-  const valid = (mode === "verifyEmail" || mode === "resetPassword") && !!code;
+  const valid = (mode === "verifyEmail" || mode === "resetPassword") && !!(code || token);
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError("");
@@ -1399,13 +1416,27 @@ export function ActionPage() {
     }
     setBusy(true);
     try {
-      if (!firebaseAuth) throw new Error(offlineMessage);
-      if (mode === "verifyEmail") {
-        await applyActionCode(firebaseAuth, code);
-        await refresh();
+      if (token) {
+        if (mode === "verifyEmail") {
+          await api("/auth/email/verify", {
+            method: "POST",
+            body: json({ token }),
+          });
+        } else {
+          await api("/auth/email/password-reset/confirm", {
+            method: "POST",
+            body: json({ token, password }),
+          });
+        }
       } else {
-        await verifyPasswordResetCode(firebaseAuth, code);
-        await confirmPasswordReset(firebaseAuth, code, password);
+        if (!firebaseAuth) throw new Error(offlineMessage);
+        if (mode === "verifyEmail") {
+          await applyActionCode(firebaseAuth, code);
+          await refresh();
+        } else {
+          await verifyPasswordResetCode(firebaseAuth, code);
+          await confirmPasswordReset(firebaseAuth, code, password);
+        }
       }
       setDone(true);
     } catch (e) {

@@ -21,6 +21,8 @@ from .services import Services, now, identifier
 from . import schemas as S
 from .demo_auth import DemoAuth
 from .google_auth import GoogleAuth
+from .password_auth import PasswordAuth
+from .brevo import BrevoMailer
 from .documents import reading_sections
 from .providers.gateway import AIUnavailable, AIRefused
 
@@ -72,7 +74,11 @@ def user(request: Request):
     if not token.startswith("Bearer "):
         raise HTTPException(401, "Sign in to your account to continue.")
     if config.auth_mode == "google":
-        claims = request.app.state.google_auth.resolve(token[7:])
+        session_token = token[7:]
+        if session_token.startswith("account_"):
+            claims = request.app.state.password_auth.resolve(session_token)
+        else:
+            claims = request.app.state.google_auth.resolve(session_token)
         request.state.account_claims = claims
         return claims["uid"]
     try:
@@ -110,6 +116,14 @@ def create_app(config=None, services=None):
     app.state.services = service
     app.state.demo_auth = DemoAuth(repo)
     app.state.google_auth = GoogleAuth(repo, service.settings.google_client_id)
+    app.state.brevo_mailer = BrevoMailer(
+        service.settings.brevo_api_key,
+        service.settings.brevo_sender_email,
+        service.settings.brevo_sender_name,
+    )
+    app.state.password_auth = PasswordAuth(
+        repo, app.state.brevo_mailer, service.settings.app_base_url
+    )
     if service.settings.auth_mode == "local":
         app.add_middleware(
             TrustedHostMiddleware,
@@ -273,6 +287,7 @@ def create_app(config=None, services=None):
             "ai_configured": getattr(service.ai, "configured", False),
             "demo_account_available": service.settings.auth_mode == "local"
             and app.state.demo_auth.available(),
+            "email_configured": app.state.brevo_mailer.configured,
         }
 
     def local_demo(request):
@@ -314,6 +329,65 @@ def create_app(config=None, services=None):
         auth = google_auth(request)
         token = request.headers.get("authorization", "")
         if token.startswith("Bearer "):
+            auth.logout(token[7:])
+        return Response(status_code=204)
+
+    def email_auth(request):
+        if service.settings.auth_mode != "google":
+            raise HTTPException(404, "Email/password sign-in is not enabled.")
+        return app.state.password_auth
+
+    @app.post("/api/v1/auth/email/signup", status_code=202)
+    def email_signup(data: S.PasswordSignup, request: Request):
+        if not app.state.brevo_mailer.configured:
+            raise HTTPException(503, "Brevo email is not configured yet.")
+        client = request.client.host if request.client else "unknown"
+        try:
+            return email_auth(request).signup(
+                data.email, data.password, data.display_name, client
+            )
+        except RuntimeError:
+            raise HTTPException(503, "The verification email could not be sent. Please try again.") from None
+
+    @app.post("/api/v1/auth/email/login")
+    def email_login(data: S.PasswordLogin, request: Request):
+        client = request.client.host if request.client else "unknown"
+        return email_auth(request).login(
+            data.email, data.password, client, data.remember
+        )
+
+    @app.post("/api/v1/auth/email/session")
+    def email_session(request: Request, owner: Owner):
+        auth = email_auth(request)
+        token = request.headers.get("authorization", "")
+        claims = auth.resolve(token[7:])
+        return auth.profile(claims["uid"])
+
+    @app.post("/api/v1/auth/email/verify")
+    def verify_email(data: S.PasswordAction, request: Request):
+        email_auth(request).verify_email(data.token)
+        return {"message": "Your email is verified. You can now log in."}
+
+    @app.post("/api/v1/auth/email/password-reset/request")
+    def request_password_reset(data: S.PasswordResetRequest, request: Request):
+        if not app.state.brevo_mailer.configured:
+            raise HTTPException(503, "Brevo email is not configured yet.")
+        client = request.client.host if request.client else "unknown"
+        try:
+            return email_auth(request).request_reset(data.email, client)
+        except RuntimeError:
+            raise HTTPException(503, "The reset email could not be sent. Please try again.") from None
+
+    @app.post("/api/v1/auth/email/password-reset/confirm")
+    def confirm_password_reset(data: S.PasswordReset, request: Request):
+        email_auth(request).reset_password(data.token, data.password)
+        return {"message": "Your password has been updated."}
+
+    @app.post("/api/v1/auth/email/logout", status_code=204)
+    def email_logout(request: Request):
+        auth = email_auth(request)
+        token = request.headers.get("authorization", "")
+        if token.startswith("Bearer account_"):
             auth.logout(token[7:])
         return Response(status_code=204)
 

@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     firebase_project_id: str = ""
     firebase_storage_bucket: str = ""
     google_client_id: str = ""
+    brevo_api_key: str = ""
+    brevo_sender_email: str = ""
+    brevo_sender_name: str = "CdMento"
+    app_base_url: str = "http://127.0.0.1:5173"
     openai_api_key: str = ""
     openai_model: str = "gpt-4.1-mini"
     ai_enabled: bool = True

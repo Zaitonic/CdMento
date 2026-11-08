@@ -1,18 +1,30 @@
+# Dependencies and generated output
 node_modules/
 dist/
-.env
-*.local
-.venv/
-__pycache__/
-.pytest_cache/
-backend/data/uploads/
-backend/data/*.sqlite3-shm
-backend/data/*.sqlite3-wal
-*.pyc
-firebase-service-account*.json
-
-# Generated output and tool caches
 build/
 .cache/
 .ruff_cache/
 artifacts/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.local
+.vercel/
+.firebase/
+.firebase-debug.log
+firebase-service-account*.json
+*service-account*.json
+
+# Python environments and caches
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Local database, uploads, and SQLite journals
+backend/data/
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal

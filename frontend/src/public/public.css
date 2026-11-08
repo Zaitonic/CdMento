@@ -1172,6 +1172,12 @@
   gap: 19px;
   margin-top: 27px;
 }
+.auth-provider-option {
+  margin-top: 25px;
+}
+.auth-provider-option .auth-divider {
+  margin-top: 17px;
+}
 .auth-label {
   display: flex;
   flex-direction: column;

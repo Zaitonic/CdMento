@@ -36,6 +36,7 @@ function ProtectedWorkspace() {
           setConnection(
             (health.auth_mode === "firebase" && provider === "firebase" && user) ||
               (health.auth_mode === "google" && provider === "google" && user) ||
+              (health.auth_mode === "google" && provider === "password" && user) ||
               (health.auth_mode === "local" && demo)
               ? "ready"
               : "Account services are not connected yet. Please try again later.",

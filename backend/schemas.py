@@ -16,6 +16,61 @@ class GoogleLogin(Input):
     remember: bool = False
 
 
+class PasswordSignup(Input):
+    email: str = Field(min_length=6, max_length=254)
+    password: str = Field(min_length=8, max_length=128)
+    display_name: str = Field(min_length=1, max_length=80)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value):
+        value = value.strip().casefold()
+        if "@" not in value or "." not in value.rsplit("@", 1)[-1] or any(c.isspace() for c in value):
+            raise ValueError("Enter a valid email address.")
+        return value
+
+    @field_validator("display_name")
+    @classmethod
+    def trim_display_name(cls, value):
+        if not value.strip():
+            raise ValueError("Enter your name.")
+        return value.strip()
+
+
+class PasswordLogin(Input):
+    email: str = Field(min_length=6, max_length=254)
+    password: str = Field(min_length=1, max_length=128)
+    remember: bool = False
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value):
+        value = value.strip().casefold()
+        if "@" not in value or "." not in value.rsplit("@", 1)[-1] or any(c.isspace() for c in value):
+            raise ValueError("Enter a valid email address.")
+        return value
+
+
+class PasswordResetRequest(Input):
+    email: str = Field(min_length=6, max_length=254)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value):
+        value = value.strip().casefold()
+        if "@" not in value or "." not in value.rsplit("@", 1)[-1] or any(c.isspace() for c in value):
+            raise ValueError("Enter a valid email address.")
+        return value
+
+
+class PasswordAction(Input):
+    token: str = Field(min_length=32, max_length=128)
+
+
+class PasswordReset(PasswordAction):
+    password: str = Field(min_length=8, max_length=128)
+
+
 class AccountProfile(Input):
     display_name: str = Field(min_length=1, max_length=80)
     bio: str = Field(default="", max_length=300)
