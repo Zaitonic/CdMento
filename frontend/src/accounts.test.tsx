@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   persistence: vi.fn(),
   signin: vi.fn(),
   signup: vi.fn(),
+  popup: vi.fn(),
   profile: vi.fn(),
   verify: vi.fn(),
   reset: vi.fn(),
@@ -28,6 +29,10 @@ vi.mock("firebase/auth", () => ({
   browserSessionPersistence: "session",
   setPersistence: mocks.persistence,
   signInWithEmailAndPassword: mocks.signin,
+  signInWithPopup: mocks.popup,
+  GoogleAuthProvider: class {
+    setCustomParameters = vi.fn();
+  },
   createUserWithEmailAndPassword: mocks.signup,
   updateProfile: mocks.profile,
   sendEmailVerification: mocks.verify,
@@ -40,6 +45,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.signin.mockResolvedValue({ user: { emailVerified: true } });
   mocks.signup.mockResolvedValue({ user: { uid: "new-user" } });
+  mocks.popup.mockResolvedValue({ user: { emailVerified: true } });
 });
 function page(mode: "login" | "signup" | "reset") {
   render(
@@ -137,6 +143,28 @@ describe("configured account flows", () => {
     expect(
       await screen.findByRole("heading", { name: "Check your inbox." }),
     ).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+  it("authenticates with Google and navigates to the requested workspace", async () => {
+    const user = userEvent.setup();
+    page("login");
+    await user.click(
+      screen.getByRole("button", { name: "Continue with Google" }),
+    );
+    expect(await screen.findByText("Your notes workspace")).toBeTruthy();
+    expect(mocks.popup).toHaveBeenCalledOnce();
+    expect(mocks.persistence).toHaveBeenCalledWith(
+      expect.anything(),
+      "local",
+    );
+  });
+  it("ignores popup cancellation when the user closes Google sign-in", async () => {
+    mocks.popup.mockRejectedValueOnce({ code: "auth/popup-closed-by-user" });
+    const user = userEvent.setup();
+    page("login");
+    await user.click(
+      screen.getByRole("button", { name: "Continue with Google" }),
+    );
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });

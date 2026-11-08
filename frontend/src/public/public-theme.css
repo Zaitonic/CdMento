@@ -503,6 +503,24 @@
 :root[data-public-theme="dark"] .public-site .auth-trust {
   color: #a0b0ba;
 }
+:root[data-public-theme="dark"] .public-site .auth-google-btn {
+  background: #1c2327;
+  border-color: #38454d;
+  color: #e6edf3;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+:root[data-public-theme="dark"] .public-site .auth-google-btn:hover:not(:disabled) {
+  background: #242c32;
+  border-color: #4a5963;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+:root[data-public-theme="dark"] .public-site .auth-divider {
+  color: #a0b0ba;
+}
+:root[data-public-theme="dark"] .public-site .auth-divider::before,
+:root[data-public-theme="dark"] .public-site .auth-divider::after {
+  border-bottom-color: #38454d;
+}
 :root[data-public-theme="dark"] .public-site .auth-form-options a,
 :root[data-public-theme="dark"] .public-site .auth-switch a,
 :root[data-public-theme="dark"] .public-site .auth-text-button {
