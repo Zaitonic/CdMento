@@ -1833,7 +1833,7 @@ progress {
     font-size: 31px;
   }
   .hero-description {
-    font-size: 10px;
+    font-size: 13px;
   }
   .brand {
     font-size: 23px;
@@ -1900,7 +1900,7 @@ progress {
     font-size: 13px;
   }
   .tool-card p {
-    font-size: 9px;
+    font-size: 12px;
   }
   .tool-card {
     min-height: 155px;
@@ -2014,8 +2014,8 @@ progress {
 }
 @media (max-width: 560px) {
   header {
-    height: 64px;
-    padding: 0 16px;
+    height: calc(64px + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 0px) 16px 0;
   }
   .search {
     display: none !important;
@@ -2034,7 +2034,7 @@ progress {
     padding: 26px 20px 0;
   }
   .page-eyebrow {
-    font-size: 6px;
+    font-size: 11px;
     letter-spacing: 1.2px;
     margin-bottom: 24px;
   }
@@ -2057,7 +2057,7 @@ progress {
     width: 100%;
   }
   .greeting {
-    font-size: 9px;
+    font-size: 12px;
     margin-bottom: 13px;
     max-width: 210px;
   }
@@ -2066,7 +2066,7 @@ progress {
     letter-spacing: -1.4px;
   }
   .hero-description {
-    font-size: 10px;
+    font-size: 13px;
     max-width: 260px;
     margin-top: 15px;
   }
@@ -2076,12 +2076,12 @@ progress {
   }
   .primary,
   .secondary {
-    font-size: 10px;
+    font-size: 12px;
     padding: 11px 14px;
   }
   .hero-actions .primary,
   .hero-actions .secondary {
-    font-size: 10px;
+    font-size: 12px;
   }
   .ask-home {
     margin-top: 22px;
@@ -2089,11 +2089,10 @@ progress {
     gap: 8px;
   }
   .ask-home input {
-    font-size: 9px;
+    font-size: 13px;
   }
   .ask-symbol {
-    width: 27px;
-    height: 29px;
+    width: 36px;\r\n    height: 36px;
   }
   .suggestions {
     gap: 6px;
@@ -2102,8 +2101,7 @@ progress {
     display: none;
   }
   .suggestions button {
-    font-size: 7px;
-    padding: 6px 8px;
+    font-size: 12px;\r\n    padding: 10px 14px;\r\n    min-height: 44px;
   }
   .section {
     margin-top: 30px;
@@ -2114,16 +2112,16 @@ progress {
     margin-bottom: 15px;
   }
   .section-heading h2 {
-    font-size: 14px;
+    font-size: 16px;
   }
   .section-heading p {
-    font-size: 9px;
+    font-size: 12px;
     line-height: 1.7;
     max-width: 215px;
     margin-top: 6px;
   }
   .text-button {
-    font-size: 8px;
+    font-size: 12px;\r\n    min-height: 44px;
     padding-top: 4px;
     gap: 4px;
   }
@@ -2180,14 +2178,14 @@ progress {
     font-size: 12px;
   }
   .tool-card p {
-    font-size: 9px;
+    font-size: 12px;
     max-width: 130px;
   }
   .tool-icon {
     margin-bottom: 16px;
   }
   .footer-note {
-    font-size: 7px;
+    font-size: 11px;
     margin-top: 25px;
   }
   .page-title h1 {
@@ -2197,7 +2195,7 @@ progress {
     font-size: 11px;
   }
   .page-title > .eyebrow {
-    font-size: 7px;
+    font-size: 11px;
   }
   .dropzone {
     padding: 30px 17px;
@@ -2235,8 +2233,7 @@ progress {
     gap: 8px;
   }
   .card-controls button {
-    font-size: 9px;
-    padding: 10px;
+    font-size: 12px;\r\n    padding: 12px;\r\n    min-height: 44px;
   }
   .quiz-card {
     padding: 23px;
@@ -2245,7 +2242,7 @@ progress {
     font-size: 18px;
   }
   .quiz-meta {
-    font-size: 9px;
+    font-size: 12px;
   }
   .quiz-options button {
     font-size: 11px;
@@ -2258,14 +2255,14 @@ progress {
     margin-bottom: 45px;
   }
   .timer-tabs button {
-    font-size: 10px;
+    font-size: 12px;\r\n    min-height: 44px;
     padding: 9px 12px;
   }
   .time {
     font-size: 72px;
   }
   .timer-card > .eyebrow {
-    font-size: 6px;
+    font-size: 11px;
   }
   .modal {
     padding: 27px;
@@ -2712,8 +2709,7 @@ progress {
     flex-wrap: wrap;
   }
   .study-tabs button {
-    font-size: 10px;
-    padding: 8px 11px;
+    font-size: 12px;\r\n    padding: 10px 14px;\r\n    min-height: 44px;
   }
   .map-toolbar {
     flex-wrap: wrap;
@@ -2730,3 +2726,24 @@ progress {
 }
 
 .source-study-actions { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:12px 22px; border-bottom:1px solid var(--border); font-size:12px; }
+
+@media (max-width: 799px) {
+  .icon-button {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .sidebar nav a {
+    min-height: 44px;
+    padding: 12px 16px;
+    font-size: 14px;
+  }
+  .sidebar-bottom {
+    padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
+  }
+  main {
+    padding-bottom: max(32px, env(safe-area-inset-bottom, 0px));
+  }
+}
