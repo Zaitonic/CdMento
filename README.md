@@ -91,3 +91,19 @@ Instead of juggling separate apps for notes, flashcards, PDF reading, and timers
 - **Source Grounding**: AI features operate strictly on the excerpts of documents you select.
 - **Offline OCR**: Optical Character Recognition runs entirely on the local CPU; document images are never sent across the network for text extraction.
 - **WCAG Accessible**: High-contrast typography, screen-reader landmarks, and minimum 44px touch targets.
+
+---
+
+## 🚀 Run locally
+
+From the repository root, install the frontend and Python dependencies, then create your local environment file:
+
+```powershell
+npm ci
+py -3.13 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+Copy-Item .env.example .env
+npm run dev:all
+```
+
+The template configures the shared CdMento Google OAuth client for local sign-in. Each teammate must be added as a test user in the Google Cloud project's **Google Auth Platform → Audience** while the app is in testing mode. The client ID is public configuration; keep `.env` and AI provider keys private and never commit them. Each developer should supply their own AI provider keys in `.env` if they need AI features. For project layout and API details, see [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) and [docs/GOOGLE_AUTH.md](docs/GOOGLE_AUTH.md).
