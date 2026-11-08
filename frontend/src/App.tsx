@@ -37,6 +37,7 @@ import { toast } from "sonner";
 
 import { useStore, type Source } from "./lib/store";
 import { api, json, waitForJob } from "./lib/api";
+import { uploadSource } from "./lib/sourceUpload";
 import { useSession, avatarSymbols } from "./lib/Session";
 import { LogoMark } from "./ui/LogoMark";
 import "./style.css";
@@ -290,12 +291,7 @@ export default function App() {
       const loading = toast.loading(`Uploading ${file.name}…`);
       try {
         await useStore.getState().flush();
-        const form = new FormData();
-        form.append("file", file);
-        const result = await api(`/notebooks/${nid}/sources`, {
-          method: "POST",
-          body: form,
-        });
+        const result = await uploadSource(file, nid);
         await useStore.getState().refresh();
         if (result.job_id) {
           toast.loading(`Processing ${file.name}…`, { id: loading });

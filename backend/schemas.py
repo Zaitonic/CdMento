@@ -71,6 +71,11 @@ class PasswordReset(PasswordAction):
     password: str = Field(min_length=8, max_length=128)
 
 
+class SourceUploadSession(Input):
+    name: str = Field(min_length=1, max_length=200)
+    size: int = Field(ge=1, le=10 * 1024 * 1024)
+
+
 class AccountProfile(Input):
     display_name: str = Field(min_length=1, max_length=80)
     bio: str = Field(default="", max_length=300)

@@ -33,25 +33,40 @@ def create_services(config):
     if config.auth_mode == "firebase" or config.data_backend == "firestore":
         import firebase_admin
         from firebase_admin import firestore, storage
+        from firebase_admin import credentials
 
         try:
             firebase_admin.get_app()
         except ValueError:
+            credential = None
+            if config.firebase_service_account_json:
+                credential = credentials.Certificate(
+                    json.loads(config.firebase_service_account_json)
+                )
             firebase_admin.initialize_app(
+                credential=credential,
                 options={
                     "projectId": config.firebase_project_id or None,
                     "storageBucket": config.firebase_storage_bucket or None,
-                }
+                },
             )
         if config.data_backend == "firestore":
-            bucket = storage.bucket()
+            if config.firebase_storage_bucket:
+                bucket = storage.bucket()
             repo = FirestoreRepository(firestore.client(), bucket)
         else:
             repo = Repository(config.data_dir)
     else:
         repo = Repository(config.data_dir)
     return Services(
-        config, repo, FileStorage(config.data_dir, bucket), AIService(config, repo)
+        config,
+        repo,
+        FileStorage(
+            config.data_dir,
+            bucket,
+            use_vercel_blob=config.data_backend == "firestore",
+        ),
+        AIService(config, repo),
     )
 
 
@@ -714,6 +729,137 @@ def create_app(config=None, services=None):
         )
         job = service.enqueue(owner, "ingest", notebook=nid, source_id=sid)
         return {"source": public_source(source), "job_id": job["id"]}
+
+    @app.post("/api/v1/notebooks/{nid}/sources/upload-sessions", status_code=201)
+    def create_source_upload(nid: str, data: S.SourceUploadSession, owner: Owner):
+        notebook(owner, nid)
+        name = Path(data.name.replace("\\", "/")).name[:200]
+        extension = name.rsplit(".", 1)[-1].lower()
+        if extension not in ("pdf", "docx", "txt"):
+            raise HTTPException(415, "Choose a PDF, DOCX or TXT document.")
+        if data.size < 1 or data.size > service.settings.max_upload_bytes:
+            raise HTTPException(413, "Files must be 10 MB or smaller.")
+        session_id = identifier()
+        return repo.put(
+            owner,
+            "upload_sessions",
+            {
+                "id": session_id,
+                "notebook": nid,
+                "name": name,
+                "type": extension,
+                "size": data.size,
+                "parts": [],
+                "created_at": now(),
+            },
+            expected=0,
+        )
+
+    @app.put(
+        "/api/v1/notebooks/{nid}/sources/upload-sessions/{upload_id}/parts/{part_index}"
+    )
+    async def put_source_upload_part(
+        nid: str,
+        upload_id: str,
+        part_index: int,
+        owner: Owner,
+        file: UploadFile = File(...),
+    ):
+        session = owned(owner, "upload_sessions", upload_id)
+        if session["notebook"] != nid:
+            raise HTTPException(404, "This upload does not exist.")
+        chunk_size = 3_500_000
+        count = (session["size"] + chunk_size - 1) // chunk_size
+        if part_index < 0 or part_index >= count:
+            raise HTTPException(400, "This upload part is invalid.")
+        content = await file.read(chunk_size + 1)
+        expected_size = min(chunk_size, session["size"] - part_index * chunk_size)
+        if len(content) != expected_size:
+            raise HTTPException(400, "This upload part has an invalid size.")
+        key = f"tmp/{owner}/source-uploads/{upload_id}/{part_index}"
+        service.storage.put(key, content, "application/octet-stream")
+        parts = sorted(set(session.get("parts", []) + [part_index]))
+        return repo.put(owner, "upload_sessions", {**session, "parts": parts})
+
+    @app.post(
+        "/api/v1/notebooks/{nid}/sources/upload-sessions/{upload_id}/complete",
+        status_code=202,
+    )
+    def complete_source_upload(nid: str, upload_id: str, owner: Owner):
+        session = owned(owner, "upload_sessions", upload_id)
+        if session["notebook"] != nid:
+            raise HTTPException(404, "This upload does not exist.")
+        chunk_size = 3_500_000
+        count = (session["size"] + chunk_size - 1) // chunk_size
+        if session.get("parts") != list(range(count)):
+            raise HTTPException(409, "Some file parts are missing. Retry the upload.")
+        content = bytearray()
+        keys = [
+            f"tmp/{owner}/source-uploads/{upload_id}/{part}"
+            for part in range(count)
+        ]
+        try:
+            for key in keys:
+                content.extend(service.storage.get(key))
+        except FileNotFoundError:
+            raise HTTPException(409, "Some file parts expired. Upload the file again.") from None
+        if len(content) != session["size"]:
+            raise HTTPException(400, "The uploaded file size did not match.")
+        checksum = hashlib.sha256(content).hexdigest()
+        existing = next(
+            (
+                source
+                for source in repo.list(owner, "sources")
+                if source["notebook"] == nid and source.get("checksum") == checksum
+            ),
+            None,
+        )
+        for key in keys:
+            service.storage.delete(key)
+        repo.delete(owner, "upload_sessions", upload_id)
+        if existing:
+            return {"source": public_source(existing), "duplicate": True}
+        sid = identifier()
+        extension = session["type"]
+        key = f"users/{owner}/sources/{sid}/original.{extension}"
+        service.storage.put(
+            key,
+            bytes(content),
+            {
+                "pdf": "application/pdf",
+                "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "txt": "text/plain",
+            }[extension],
+        )
+        source = repo.put(
+            owner,
+            "sources",
+            {
+                "id": sid,
+                "notebook": nid,
+                "name": session["name"],
+                "type": extension,
+                "text": "",
+                "date": now(),
+                "status": "queued",
+                "checksum": checksum,
+                "storage_key": key,
+            },
+        )
+        job = service.enqueue(owner, "ingest", notebook=nid, source_id=sid)
+        return {"source": public_source(source), "job_id": job["id"]}
+
+    @app.delete("/api/v1/notebooks/{nid}/sources/upload-sessions/{upload_id}", status_code=204)
+    def cancel_source_upload(nid: str, upload_id: str, owner: Owner):
+        session = repo.get(owner, "upload_sessions", upload_id)
+        if not session or session.get("notebook") != nid:
+            return Response(status_code=204)
+        for part in session.get("parts", []):
+            service.storage.delete(
+                f"tmp/{owner}/source-uploads/{upload_id}/{part}"
+            )
+        repo.delete(owner, "upload_sessions", upload_id)
+        return Response(status_code=204)
 
     @app.get("/api/v1/sources/{sid}/file")
     def original_source(sid: str, owner: Owner):

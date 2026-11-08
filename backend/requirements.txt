@@ -18,3 +18,4 @@ Pillow>=12,<13
 rapidocr>=3.10,<4
 onnxruntime>=1.31,<2
 google-auth>=2,<3
+vercel-blob>=0.5,<0.6

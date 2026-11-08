@@ -19,6 +19,7 @@ import {
 import { toast } from "sonner";
 import { useStore, type Source } from "../../lib/store";
 import { api, json, sourceFile, waitForJob } from "../../lib/api";
+import { uploadSource } from "../../lib/sourceUpload";
 
 import ReviewerPanel from "./ReviewerPanel";
 
@@ -125,12 +126,7 @@ export default function SourcesPage({
       for (const file of files) {
         if (file.size > 10 * 1024 * 1024)
           throw new Error("Files must be 10 MB or smaller.");
-        const form = new FormData();
-        form.append("file", file);
-        const result = await api(`/notebooks/${notebook}/sources`, {
-          method: "POST",
-          body: form,
-        });
+        const result = await uploadSource(file, notebook);
         await useStore.getState().refresh();
         if (result.job_id) await waitForJob(result.job_id);
         await useStore.getState().refresh();

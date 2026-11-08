@@ -91,6 +91,15 @@ class FirestoreRepository:
     def decode(self, data):
         if data and "_blob" in data:
             return json.loads(self.bucket.blob(data["_blob"]).download_as_bytes())
+        if data and "_chunk_id" in data:
+            chunks = (
+                self.db.collection("record_payloads")
+                .document(data["_chunk_id"])
+                .collection("parts")
+                .stream()
+            )
+            parts = sorted(chunks, key=lambda item: item.to_dict()["index"])
+            return json.loads("".join(item.to_dict()["text"] for item in parts))
         return data
 
     def get(self, owner, kind, identifier):
@@ -114,10 +123,27 @@ class FirestoreRepository:
 
         reference = self.collection(owner, kind).document(value["id"])
         value = copy.deepcopy(value)
-        # Large extracted text and graph payloads belong in private object storage.
+        # Firestore free-tier projects can store large records in private chunks.
         blob_path = None
-        if len(json.dumps(value).encode()) > 150_000:
+        chunk_id = None
+        encoded = json.dumps(value, ensure_ascii=False)
+        if len(encoded.encode()) > 150_000 and self.bucket:
             blob_path = f"users/{owner}/records/{kind}/{value['id']}/{uuid4()}.json"
+        elif len(encoded.encode()) > 150_000:
+            chunk_id = str(uuid4())
+            payloads = [
+                encoded[i : i + 600_000]
+                for i in range(0, len(encoded), 600_000)
+            ]
+            parts = (
+                self.db.collection("record_payloads")
+                .document(chunk_id)
+                .collection("parts")
+            )
+            for index, text in enumerate(payloads):
+                parts.document(f"{index:04d}").set(
+                    {"index": index, "text": text}
+                )
         transaction = self.db.transaction()
 
         @firestore.transactional
@@ -142,23 +168,61 @@ class FirestoreRepository:
                         "_blob": blob_path,
                     },
                 )
+            elif chunk_id:
+                tx.set(
+                    reference,
+                    {
+                        "id": value["id"],
+                        "revision": value["revision"],
+                        "_chunk_id": chunk_id,
+                        "_chunk_count": len(payloads),
+                    },
+                )
             else:
                 tx.set(reference, value)
-            return previous.get("_blob")
+            return previous.get("_blob"), previous.get("_chunk_id")
 
         try:
-            previous_blob = write(transaction)
+            previous_blob, previous_chunk = write(transaction)
         except Exception:
             if blob_path:
                 self.bucket.blob(blob_path).delete()
+            if chunk_id:
+                self.db.collection("record_payloads").document(chunk_id).delete()
+                for part in (
+                    self.db.collection("record_payloads")
+                    .document(chunk_id)
+                    .collection("parts")
+                    .stream()
+                ):
+                    part.reference.delete()
             raise
         if previous_blob and previous_blob != blob_path:
             self.bucket.blob(previous_blob).delete()
+        if previous_chunk and previous_chunk != chunk_id:
+            parts = (
+                self.db.collection("record_payloads")
+                .document(previous_chunk)
+                .collection("parts")
+            )
+            for part in parts.stream():
+                part.reference.delete()
+            self.db.collection("record_payloads").document(previous_chunk).delete()
         return value
 
     def delete(self, owner, kind, identifier):
         ref = self.collection(owner, kind).document(identifier)
         snapshot = ref.get()
-        if snapshot.exists and snapshot.to_dict().get("_blob"):
-            self.bucket.blob(snapshot.to_dict()["_blob"]).delete()
+        if snapshot.exists:
+            data = snapshot.to_dict()
+            if data.get("_blob"):
+                self.bucket.blob(data["_blob"]).delete()
+            if data.get("_chunk_id"):
+                chunks = (
+                    self.db.collection("record_payloads")
+                    .document(data["_chunk_id"])
+                )
+                for part in chunks.collection("parts").stream():
+                    part.reference.delete()
+                chunks.delete()
         ref.delete()

@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     data_backend: str = "sqlite"
     data_dir: Path = ROOT / "backend" / "data"
     firebase_project_id: str = ""
+    firebase_service_account_json: str = ""
     firebase_storage_bucket: str = ""
     google_client_id: str = ""
     brevo_api_key: str = ""
@@ -49,8 +50,12 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "Use AUTH_MODE=local|google|firebase and DATA_BACKEND=sqlite|firestore."
             )
-        if self.data_backend == "firestore" and self.auth_mode != "firebase":
-            raise RuntimeError("Firestore requires Firebase authentication.")
+        if self.data_backend == "firestore" and not (
+            self.firebase_project_id and self.firebase_service_account_json
+        ):
+            raise RuntimeError(
+                "FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT_JSON are required for Firestore."
+            )
         if self.auth_mode == "google" and not self.google_client_id:
             raise RuntimeError("GOOGLE_CLIENT_ID is required for Google authentication.")
 

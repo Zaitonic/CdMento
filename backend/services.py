@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -40,10 +41,17 @@ class Services:
             from .tasks import celery_app
 
             celery_app.send_task("cdmento.run_job", args=[owner, job["id"]])
+        elif os.getenv("VERCEL") == "1":
+            self.run_job(owner, job["id"])
+            return self.repo.get(owner, "jobs", job["id"])
         return job
 
     def start(self):
-        if not self.settings.worker_enabled or self.settings.redis_url:
+        if (
+            not self.settings.worker_enabled
+            or self.settings.redis_url
+            or os.getenv("VERCEL") == "1"
+        ):
             return
         self.worker = threading.Thread(
             target=self.loop, daemon=True, name="cdmento-jobs"
