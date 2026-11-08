@@ -2092,7 +2092,8 @@ progress {
     font-size: 13px;
   }
   .ask-symbol {
-    width: 36px;\r\n    height: 36px;
+    width: 36px;
+    height: 36px;
   }
   .suggestions {
     gap: 6px;
@@ -2101,7 +2102,9 @@ progress {
     display: none;
   }
   .suggestions button {
-    font-size: 12px;\r\n    padding: 10px 14px;\r\n    min-height: 44px;
+    font-size: 12px;
+    padding: 10px 14px;
+    min-height: 44px;
   }
   .section {
     margin-top: 30px;
@@ -2121,7 +2124,8 @@ progress {
     margin-top: 6px;
   }
   .text-button {
-    font-size: 12px;\r\n    min-height: 44px;
+    font-size: 12px;
+    min-height: 44px;
     padding-top: 4px;
     gap: 4px;
   }
@@ -2233,7 +2237,9 @@ progress {
     gap: 8px;
   }
   .card-controls button {
-    font-size: 12px;\r\n    padding: 12px;\r\n    min-height: 44px;
+    font-size: 12px;
+    padding: 12px;
+    min-height: 44px;
   }
   .quiz-card {
     padding: 23px;
@@ -2255,7 +2261,8 @@ progress {
     margin-bottom: 45px;
   }
   .timer-tabs button {
-    font-size: 12px;\r\n    min-height: 44px;
+    font-size: 12px;
+    min-height: 44px;
     padding: 9px 12px;
   }
   .time {
@@ -2709,7 +2716,9 @@ progress {
     flex-wrap: wrap;
   }
   .study-tabs button {
-    font-size: 12px;\r\n    padding: 10px 14px;\r\n    min-height: 44px;
+    font-size: 12px;
+    padding: 10px 14px;
+    min-height: 44px;
   }
   .map-toolbar {
     flex-wrap: wrap;
