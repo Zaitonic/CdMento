@@ -1266,6 +1266,11 @@
   outline: 2px solid #7758d9;
   outline-offset: 2px;
 }
+.auth-google-id-button {
+  display: flex;
+  min-height: 44px;
+  justify-content: center;
+}
 .auth-divider {
   display: flex;
   align-items: center;

@@ -45,8 +45,10 @@ import {
   setPersistence,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   updateProfile,
   verifyPasswordResetCode,
+  type UserCredential,
 } from "firebase/auth";
 import { firebaseAuth } from "../lib/auth";
 import { api, ApiError } from "../lib/api";
@@ -58,6 +60,7 @@ import { LogoMark } from "../ui/LogoMark";
 import { initScrollEffects } from "./scroll-effects.js";
 import TopoBackground from "./TopoBackground";
 import { ThemeToggle } from "./PublicTheme";
+import { GoogleSignInButton } from "./GoogleSignInButton";
 
 export function PublicBrand() {
   return (
@@ -863,8 +866,8 @@ function PasswordField({
   );
 }
 export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
-  const { user: firebaseUser, demo, loading, loginDemo } = useSession();
-  const user = firebaseUser || demo;
+  const { user, demo, loading, loginDemo, loginGoogle } = useSession();
+  const accountUser = user || demo;
   const navigate = useNavigate();
   const location = useLocation();
   const [params] = useSearchParams();
@@ -881,26 +884,33 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
   const [fields, setFields] = useState<Record<string, string>>({});
   const [sent, setSent] = useState(false);
   const [demoAvailable, setDemoAvailable] = useState(false);
+  const [authMode, setAuthMode] = useState("checking");
+  const [healthAttempt, retryHealth] = useState(0);
   useEffect(() => {
-    if (firebaseAuth || mode !== "login") {
-      setDemoAvailable(false);
-      return;
-    }
     let active = true;
     api("/health")
       .then((health) => {
-        if (active)
+        if (active) {
+          setAuthMode(health.auth_mode);
           setDemoAvailable(
-            health.auth_mode === "local" && !!health.demo_account_available,
+            mode === "login" && health.auth_mode === "local" && !!health.demo_account_available,
           );
+        }
       })
       .catch(() => {
-        if (active) setDemoAvailable(false);
+        if (active) {
+          setAuthMode("unavailable");
+          setDemoAvailable(false);
+        }
       });
     return () => {
       active = false;
     };
-  }, [mode]);
+  }, [mode, healthAttempt]);
+  const googleMode = authMode === "google";
+  const firebaseMode = authMode === "firebase" && !!firebaseAuth;
+  const localDemoMode = authMode === "local" && demoAvailable;
+  const signInReady = googleMode || firebaseMode || localDemoMode;
   useEffect(() => {
     setError("");
     setFields({});
@@ -909,11 +919,11 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
     setSent(false);
     document.title = `${signup ? "Create your account" : reset ? "Reset your password" : "Welcome back"} — CdMento`;
   }, [mode]);
-  if (!loading && user && !reset && !busy)
+  if (!loading && accountUser && !reset && !busy)
     return (
       <Navigate
         to={
-          user.emailVerified
+          accountUser.emailVerified
             ? next
             : `/verify-email?next=${encodeURIComponent(next)}`
         }
@@ -1002,7 +1012,15 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
       );
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
-      const credential = await signInWithPopup(auth, provider);
+      let credential: UserCredential;
+      try {
+        credential = await signInWithPopup(auth, provider);
+      } catch (error) {
+        if ((error as { code?: string }).code !== "auth/popup-blocked")
+          throw error;
+        await signInWithRedirect(auth, provider);
+        return;
+      }
       navigate(
         credential.user.emailVerified
           ? next
@@ -1014,6 +1032,18 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
       if (code !== "auth/popup-closed-by-user") {
         setError(authError(e));
       }
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function handleGoogleCredential(credential: string) {
+    setError("");
+    setBusy(true);
+    try {
+      await loginGoogle(credential, remember);
+      navigate(next, { replace: true });
+    } catch (e) {
+      setError(authError(e));
     } finally {
       setBusy(false);
     }
@@ -1051,7 +1081,33 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
               ? "Create your own space to learn, practice, and grow."
               : "A fresh perspective is just a sign-in away."}
         </p>
-        {sent ? (
+        {googleMode && reset ? (
+          <div className="auth-success" role="status">
+            <p>Your account uses Google sign-in. CdMento does not manage your Google password.</p>
+            <a className="pub-button" href="https://accounts.google.com/signin/recovery" target="_blank" rel="noreferrer">
+              Recover your Google account <ArrowRight size={16} />
+            </a>
+          </div>
+        ) : !signInReady ? (
+          <div className="auth-notice" role="status">
+            <p>
+              {authMode === "checking"
+                ? "Checking account services…"
+                : authMode === "unavailable"
+                  ? "Can’t reach account services. Start the backend and try again."
+                  : "Sign-in is not configured for this mode."}
+            </p>
+            {authMode !== "checking" && (
+              <button
+                type="button"
+                className="auth-text-button"
+                onClick={() => retryHealth((attempt) => attempt + 1)}
+              >
+                Try again
+              </button>
+            )}
+          </div>
+        ) : sent ? (
           <div className="auth-success" role="status">
             <CheckCircle2 />
             <h3>Check your inbox.</h3>
@@ -1064,18 +1120,33 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
             </Link>
           </div>
         ) : (
-          <form onSubmit={submit} className="auth-form" key={location.pathname}>
-            {!firebaseAuth && !demoAvailable && (
-              <div className="auth-notice" role="status">
-                Account services are not connected yet.
-              </div>
-            )}
+          googleMode ? (
+            <div className="auth-form" key={location.pathname}>
+              {error && <p className="auth-error" role="alert">{error}</p>}
+              {busy ? (
+                <p className="auth-notice" role="status"><LoaderCircle className="loading-spin" size={18} /> Signing in…</p>
+              ) : (
+                <GoogleSignInButton
+                  onCredential={handleGoogleCredential}
+                  onError={setError}
+                />
+              )}
+              <label className="auth-form-options">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                />{" "}
+                Keep me signed in
+              </label>
+            </div>
+          ) : <form onSubmit={submit} className="auth-form" key={location.pathname}>
             {demoAvailable && (
               <div className="auth-notice" role="status">
                 Local demo account · your workspace is saved on this computer.
               </div>
             )}
-            {!reset && (
+            {!reset && firebaseMode && (
               <>
                 <button
                   type="button"

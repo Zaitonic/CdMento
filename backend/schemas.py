@@ -11,6 +11,11 @@ class DemoLogin(Input):
     password: str = Field(min_length=1, max_length=256)
 
 
+class GoogleLogin(Input):
+    credential: str = Field(min_length=100, max_length=12000)
+    remember: bool = False
+
+
 class AccountProfile(Input):
     display_name: str = Field(min_length=1, max_length=80)
     bio: str = Field(default="", max_length=300)

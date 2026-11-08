@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     data_dir: Path = ROOT / "backend" / "data"
     firebase_project_id: str = ""
     firebase_storage_bucket: str = ""
+    google_client_id: str = ""
     openai_api_key: str = ""
     openai_model: str = "gpt-4.1-mini"
     ai_enabled: bool = True
@@ -37,15 +38,17 @@ class Settings(BaseSettings):
     ocr_max_pages: int = Field(default=100, ge=1, le=200)
 
     def validate_modes(self):
-        if self.auth_mode not in ("local", "firebase") or self.data_backend not in (
+        if self.auth_mode not in ("local", "google", "firebase") or self.data_backend not in (
             "sqlite",
             "firestore",
         ):
             raise RuntimeError(
-                "Use AUTH_MODE=local|firebase and DATA_BACKEND=sqlite|firestore."
+                "Use AUTH_MODE=local|google|firebase and DATA_BACKEND=sqlite|firestore."
             )
         if self.data_backend == "firestore" and self.auth_mode != "firebase":
             raise RuntimeError("Firestore requires Firebase authentication.")
+        if self.auth_mode == "google" and not self.google_client_id:
+            raise RuntimeError("GOOGLE_CLIENT_ID is required for Google authentication.")
 
 
 settings = Settings()

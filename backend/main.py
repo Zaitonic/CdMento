@@ -20,6 +20,7 @@ from .ai import AIService
 from .services import Services, now, identifier
 from . import schemas as S
 from .demo_auth import DemoAuth
+from .google_auth import GoogleAuth
 from .documents import reading_sections
 from .providers.gateway import AIUnavailable, AIRefused
 
@@ -70,6 +71,10 @@ def user(request: Request):
     token = request.headers.get("authorization", "")
     if not token.startswith("Bearer "):
         raise HTTPException(401, "Sign in to your account to continue.")
+    if config.auth_mode == "google":
+        claims = request.app.state.google_auth.resolve(token[7:])
+        request.state.account_claims = claims
+        return claims["uid"]
     try:
         from firebase_admin import auth
 
@@ -104,6 +109,7 @@ def create_app(config=None, services=None):
     app = FastAPI(title="CdMento API", version="1.0.0", lifespan=lifespan)
     app.state.services = service
     app.state.demo_auth = DemoAuth(repo)
+    app.state.google_auth = GoogleAuth(repo, service.settings.google_client_id)
     if service.settings.auth_mode == "local":
         app.add_middleware(
             TrustedHostMiddleware,
@@ -288,6 +294,29 @@ def create_app(config=None, services=None):
         auth = local_demo(request)
         return auth.login(data.email, data.password, request.client.host)
 
+    def google_auth(request):
+        if service.settings.auth_mode != "google":
+            raise HTTPException(404, "Google sign-in is not enabled.")
+        return app.state.google_auth
+
+    @app.post("/api/v1/auth/google/login")
+    def google_login(data: S.GoogleLogin, request: Request):
+        auth = google_auth(request)
+        client = request.client.host if request.client else "unknown"
+        return auth.login(data.credential, data.remember, client)
+
+    @app.get("/api/v1/auth/google/session")
+    def google_session(request: Request, owner: Owner):
+        return google_auth(request).profile(owner)
+
+    @app.post("/api/v1/auth/google/logout", status_code=204)
+    def google_logout(request: Request):
+        auth = google_auth(request)
+        token = request.headers.get("authorization", "")
+        if token.startswith("Bearer "):
+            auth.logout(token[7:])
+        return Response(status_code=204)
+
     @app.get("/api/v1/auth/demo/session")
     def demo_session(request: Request):
         auth = local_demo(request)
@@ -311,7 +340,7 @@ def create_app(config=None, services=None):
 
     @app.put("/api/v1/me/profile")
     def save_account_profile(request: Request, owner: Owner):
-        if service.settings.auth_mode != "firebase":
+        if service.settings.auth_mode not in ("firebase", "google"):
             raise HTTPException(503, "Cloud accounts are not configured.")
         claims = request.state.account_claims
         with locks[owner]:

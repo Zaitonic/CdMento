@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   signin: vi.fn(),
   signup: vi.fn(),
   popup: vi.fn(),
+  redirect: vi.fn(),
   profile: vi.fn(),
   verify: vi.fn(),
   reset: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock("firebase/auth", () => ({
   setPersistence: mocks.persistence,
   signInWithEmailAndPassword: mocks.signin,
   signInWithPopup: mocks.popup,
+  signInWithRedirect: mocks.redirect,
   GoogleAuthProvider: class {
     setCustomParameters = vi.fn();
   },
@@ -166,5 +168,14 @@ describe("configured account flows", () => {
       screen.getByRole("button", { name: "Continue with Google" }),
     );
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+  it("falls back to Google redirect when the browser blocks the popup", async () => {
+    mocks.popup.mockRejectedValueOnce({ code: "auth/popup-blocked" });
+    const user = userEvent.setup();
+    page("login");
+    await user.click(
+      screen.getByRole("button", { name: "Continue with Google" }),
+    );
+    expect(mocks.redirect).toHaveBeenCalledOnce();
   });
 });

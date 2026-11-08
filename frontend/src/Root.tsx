@@ -21,20 +21,21 @@ import "./public/light-typography.css";
 const Workspace = lazy(() => import("./App"));
 
 function ProtectedWorkspace() {
-  const { user: firebaseUser, demo, loading } = useSession();
-  const user = firebaseUser || demo;
+  const { user, demo, provider, loading } = useSession();
+  const accountUser = user || demo;
   const location = useLocation();
   const [connection, setConnection] = useState("checking");
   const [attempt, retry] = useState(0);
   useEffect(() => {
-    if (!user?.emailVerified) return;
+    if (!accountUser?.emailVerified) return;
     let active = true;
     setConnection("checking");
     api("/health")
       .then((health) => {
         if (active)
           setConnection(
-            (health.auth_mode === "firebase" && firebaseUser) ||
+            (health.auth_mode === "firebase" && provider === "firebase" && user) ||
+              (health.auth_mode === "google" && provider === "google" && user) ||
               (health.auth_mode === "local" && demo)
               ? "ready"
               : "Account services are not connected yet. Please try again later.",
@@ -49,7 +50,7 @@ function ProtectedWorkspace() {
     return () => {
       active = false;
     };
-  }, [user?.uid, user?.emailVerified, attempt, !!demo]);
+  }, [accountUser?.uid, accountUser?.emailVerified, attempt, !!demo, provider]);
   if (loading)
     return (
       <div className="public-site public-loading" role="status">
@@ -59,8 +60,8 @@ function ProtectedWorkspace() {
   const next = encodeURIComponent(
     safeNext(location.pathname + location.search),
   );
-  if (!user) return <Navigate to={`/login?next=${next}`} replace />;
-  if (!user.emailVerified)
+  if (!accountUser) return <Navigate to={`/login?next=${next}`} replace />;
+  if (!accountUser.emailVerified)
     return <Navigate to={`/verify-email?next=${next}`} replace />;
   if (connection !== "ready")
     return (

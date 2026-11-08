@@ -33,7 +33,15 @@ type DemoProfile = {
   emailVerified: true;
   kind: "local-demo";
 };
+type GoogleProfile = {
+  uid: string;
+  email: string;
+  displayName: string;
+  emailVerified: true;
+  kind: "google";
+};
 const DEMO_KEY = "cdmento-demo-token";
+const GOOGLE_KEY = "cdmento-google-token";
 function savedDemoToken() {
   try {
     return (
@@ -51,8 +59,26 @@ function clearDemoStorage() {
     /* Storage can be disabled. */
   }
 }
+function savedGoogleToken() {
+  try {
+    return (
+      sessionStorage.getItem(GOOGLE_KEY) || localStorage.getItem(GOOGLE_KEY) || ""
+    );
+  } catch {
+    return "";
+  }
+}
+function clearGoogleStorage() {
+  try {
+    sessionStorage.removeItem(GOOGLE_KEY);
+    localStorage.removeItem(GOOGLE_KEY);
+  } catch {
+    /* Storage can be unavailable. */
+  }
+}
 const Session = createContext({
-  user: null as User | null,
+  user: null as User | GoogleProfile | null,
+  provider: "" as "firebase" | "google" | "",
   demo: null as DemoProfile | null,
   loading: true,
   account: null as AccountProfile | null,
@@ -66,12 +92,16 @@ const Session = createContext({
     _password: string,
     _remember: boolean,
   ) => {},
+  loginGoogle: async (_credential: string, _remember: boolean) => {},
 });
 export const useSession = () => useContext(Session);
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | GoogleProfile | null>(null);
+  const [provider, setProvider] = useState<"firebase" | "google" | "">("");
   const [demo, setDemo] = useState<DemoProfile | null>(null);
-  const [loading, setLoading] = useState(!!firebaseAuth || !!savedDemoToken());
+  const [loading, setLoading] = useState(
+    !!firebaseAuth || !!savedDemoToken() || !!savedGoogleToken(),
+  );
   const [account, setAccount] = useState<AccountProfile | null>(null);
   const [accountError, setAccountError] = useState("");
   const demoVersion = useRef(0);
@@ -112,6 +142,34 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }
   useEffect(() => {
     if (!firebaseAuth) {
+      const googleToken = savedGoogleToken();
+      if (googleToken) {
+        let active = true;
+        const epoch = ++demoVersion.current;
+        setToken(googleToken);
+        api<GoogleProfile>("/auth/google/session")
+          .then((profile) => {
+            if (!active || epoch !== demoVersion.current) return;
+            if (useStore.getState().owner !== profile.uid)
+              useStore.getState().clearSession();
+            setUser(profile);
+            setProvider("google");
+          })
+          .catch(() => {
+            if (!active || epoch !== demoVersion.current) return;
+            clearGoogleStorage();
+            setToken("");
+            setUser(null);
+            setProvider("");
+            useStore.getState().clearSession();
+          })
+          .finally(() => {
+            if (active && epoch === demoVersion.current) setLoading(false);
+          });
+        return () => {
+          active = false;
+        };
+      }
       const token = savedDemoToken();
       if (!token) {
         setLoading(false);
@@ -152,11 +210,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           useStore.getState().clearSession();
         setToken(token);
         setUser(current);
+        setProvider(current ? "firebase" : "");
         render((n) => n + 1);
       } catch {
         if (!active || epoch !== version) return;
         setToken("");
         setUser(null);
+        setProvider("");
         useStore.getState().clearSession();
       } finally {
         if (active && epoch === version) setLoading(false);
@@ -172,6 +232,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setDemo(await api<DemoProfile>("/auth/demo/session"));
       return;
     }
+    if (provider === "google") {
+      setUser(await api<GoogleProfile>("/auth/google/session"));
+      return;
+    }
     if (!firebaseAuth?.currentUser) return;
     await firebaseAuth.currentUser.reload();
     setToken(await firebaseAuth.currentUser.getIdToken(true));
@@ -185,10 +249,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       demoVersion.current++;
       clearDemoStorage();
       setDemo(null);
+    } else if (provider === "google") {
+      await api("/auth/google/logout", { method: "POST" });
+      clearGoogleStorage();
     } else if (firebaseAuth) await signOut(firebaseAuth);
     setToken("");
     useStore.getState().clearSession();
     setUser(null);
+    setProvider("");
     setAccount(null);
     window.location.href = "/";
   }
@@ -215,15 +283,39 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setDemo(result.profile);
     setLoading(false);
   }
+  async function loginGoogle(credential: string, remember: boolean) {
+    const result = await api<{ token: string; profile: GoogleProfile }>(
+      "/auth/google/login",
+      { method: "POST", body: json({ credential, remember }) },
+    );
+    useStore.getState().clearSession();
+    clearDemoStorage();
+    clearGoogleStorage();
+    try {
+      (remember ? localStorage : sessionStorage).setItem(
+        GOOGLE_KEY,
+        result.token,
+      );
+    } catch {
+      /* Current-session sign-in works without storage. */
+    }
+    setToken(result.token);
+    setDemo(null);
+    setUser(result.profile);
+    setProvider("google");
+    setLoading(false);
+  }
   return (
     <Session.Provider
       value={{
         user,
+        provider,
         demo,
         loading,
         refresh,
         logout,
         loginDemo,
+        loginGoogle,
         account,
         accountError,
         saveAccount,

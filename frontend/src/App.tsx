@@ -85,8 +85,8 @@ function readSidebarWidth() {
 }
 
 export default function App() {
-  const { user: firebaseUser, demo, logout, account } = useSession();
-  const user = firebaseUser || demo;
+  const { user: accountUser, demo, logout, account } = useSession();
+  const user = accountUser || demo;
   const s = useStore();
   const navigate = useNavigate();
   const location = useLocation();
