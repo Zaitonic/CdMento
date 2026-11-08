@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import SourcesPage from "./SourcesPage";
 import { useStore } from "../../lib/store";
 import { api, waitForJob } from "../../lib/api";
-vi.mock("../../api", () => ({
+vi.mock("../../lib/api", () => ({
   api: vi.fn(),
   waitForJob: vi.fn(),
   sourceFile: vi.fn(),

@@ -4,8 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { SessionProvider, useSession } from "./lib/Session";
 import { api, setToken } from "./lib/api";
 import { useStore } from "./lib/store";
-vi.mock("./auth", () => ({ firebaseAuth: null }));
-vi.mock("./api", () => ({
+vi.mock("./lib/auth", () => ({ firebaseAuth: null }));
+vi.mock("./lib/api", () => ({
   api: vi.fn(),
   setToken: vi.fn(),
   json: JSON.stringify,

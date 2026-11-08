@@ -11,11 +11,11 @@ const mocks = vi.hoisted(() => ({
   verify: vi.fn(),
   reset: vi.fn(),
 }));
-vi.mock("./auth", () => ({ firebaseAuth: { currentUser: null } }));
-vi.mock("./api", () => ({
+vi.mock("./lib/auth", () => ({ firebaseAuth: { currentUser: null } }));
+vi.mock("./lib/api", () => ({
   api: vi.fn().mockResolvedValue({ auth_mode: "firebase" }),
 }));
-vi.mock("./Session", () => ({
+vi.mock("./lib/Session", () => ({
   useSession: () => ({
     user: null,
     loading: false,

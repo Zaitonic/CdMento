@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { AuthPage, Landing, ActionPage } from "./public/PublicPages";
 import Root from "./Root";
 import { safeNext } from "./lib/paths";
-vi.mock("./auth", () => ({ firebaseAuth: null }));
+vi.mock("./lib/auth", () => ({ firebaseAuth: null }));
 function page(element: React.ReactNode, path = "/") {
   return render(<MemoryRouter initialEntries={[path]}>{element}</MemoryRouter>);
 }

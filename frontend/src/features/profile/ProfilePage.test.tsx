@@ -21,7 +21,7 @@ const session = vi.hoisted(() => ({
   logout: vi.fn(),
   refreshAccount: vi.fn(),
 }));
-vi.mock("../../Session", () => ({
+vi.mock("../../lib/Session", () => ({
   useSession: () => session,
   avatarSymbols: { book: "📚", plant: "🌱" },
 }));

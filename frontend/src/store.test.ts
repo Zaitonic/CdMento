@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
 const apiMock = vi.hoisted(() => vi.fn());
-vi.mock("./api", () => ({ api: apiMock, json: JSON.stringify }));
+vi.mock("./lib/api", () => ({ api: apiMock, json: JSON.stringify }));
 
 import { activeNotebookKey, useStore } from "./lib/store";
 
