@@ -12,23 +12,11 @@
       "root": ".",
       "framework": "fastapi",
       "entrypoint": "backend.main:app",
-      "excludeFiles": [
-        "node_modules/**",
-        "frontend/**",
-        "public/**",
-        "build/**",
-        "dist/**",
-        ".git/**",
-        ".cache/**",
-        ".ruff_cache/**",
-        ".pytest_cache/**",
-        "backend/tests/**",
-        "backend/data/**",
-        "artifacts/**",
-        "docs/**",
-        "examples/**",
-        "scripts/**"
-      ]
+      "functions": {
+        "**/*.py": {
+          "excludeFiles": "{node_modules/**,frontend/**,public/**,build/**,dist/**,.git/**,.cache/**,.ruff_cache/**,.pytest_cache/**,backend/tests/**,backend/data/**,artifacts/**,docs/**,examples/**,scripts/**}"
+        }
+      }
     }
   },
   "rewrites": [
