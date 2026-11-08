@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { AuthPage, Landing, ActionPage } from "./PublicPages";
+import { AuthPage, Landing, ActionPage } from "./public/PublicPages";
 import Root from "./Root";
-import { safeNext } from "./paths";
+import { safeNext } from "./lib/paths";
 vi.mock("./auth", () => ({ firebaseAuth: null }));
 function page(element: React.ReactNode, path = "/") {
   return render(<MemoryRouter initialEntries={[path]}>{element}</MemoryRouter>);

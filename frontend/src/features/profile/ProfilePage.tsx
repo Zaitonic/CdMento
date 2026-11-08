@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { BookOpen, LogOut, Save, Sparkles } from "lucide-react";
-import { useSession, avatarSymbols } from "../../Session";
-import { useStore } from "../../store";
+import { useSession, avatarSymbols } from "../../lib/Session";
+import { useStore } from "../../lib/store";
 import "./profile.css";
 
 const colors = ["purple", "blue", "green", "orange", "pink"];

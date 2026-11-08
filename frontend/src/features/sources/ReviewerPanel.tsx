@@ -2,8 +2,8 @@ import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { Sparkles, Save, FileText } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../../api";
-import { type Source, useStore } from "../../store";
+import { api } from "../../lib/api";
+import { type Source, useStore } from "../../lib/store";
 import { useArtifacts } from "../study/StudyShared";
 import { AIAccess } from "../ai/AIAccess";
 export type SourceCitation = {

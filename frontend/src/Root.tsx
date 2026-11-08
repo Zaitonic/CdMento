@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { MotionConfig } from "motion/react";
 import { Toaster } from "sonner";
-import { SessionProvider, useSession } from "./Session";
+import { SessionProvider, useSession } from "./lib/Session";
 import {
   Landing,
   GetAppPage,
@@ -10,14 +10,14 @@ import {
   VerifyPage,
   ActionPage,
   PublicBrand,
-} from "./PublicPages";
-import { api } from "./api";
-import { safeNext } from "./paths";
-import { PublicThemeProvider } from "./PublicTheme";
+} from "./public/PublicPages";
+import { api } from "./lib/api";
+import { safeNext } from "./lib/paths";
+import { PublicThemeProvider } from "./public/PublicTheme";
 import "./style.css";
-import "./public.css";
-import "./public-theme.css";
-import "./light-typography.css";
+import "./public/public.css";
+import "./public/public-theme.css";
+import "./public/light-typography.css";
 const Workspace = lazy(() => import("./App"));
 
 function ProtectedWorkspace() {

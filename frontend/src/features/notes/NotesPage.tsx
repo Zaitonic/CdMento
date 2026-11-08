@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Plus, NotebookPen, Trash2, Check, BookOpen } from "lucide-react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { useStore } from "../../store";
+import { useStore } from "../../lib/store";
 function PageTitle({ title, desc }: { title: string; desc: string }) {
   return (
     <div className="page-title">

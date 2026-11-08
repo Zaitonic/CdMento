@@ -35,10 +35,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useStore, type Source } from "./store";
-import { api, json, waitForJob } from "./api";
-import { useSession, avatarSymbols } from "./Session";
-import { LogoMark } from "./LogoMark";
+import { useStore, type Source } from "./lib/store";
+import { api, json, waitForJob } from "./lib/api";
+import { useSession, avatarSymbols } from "./lib/Session";
+import { LogoMark } from "./ui/LogoMark";
 import "./style.css";
 import "./features/workspace.css";
 import "./features/profile/profile.css";
@@ -47,7 +47,7 @@ import SourcesPage from "./features/sources/SourcesPage";
 import AssistantPage from "./features/assistant/AssistantPage";
 import NotebookLibrary from "./features/notebooks/NotebookLibrary";
 const ProfilePage = React.lazy(() => import("./features/profile/ProfilePage"));
-const CloudPanel = React.lazy(() => import("./CloudPanel"));
+const CloudPanel = React.lazy(() => import("./features/cloud/CloudPanel"));
 const Notes = React.lazy(() => import("./features/notes/NotesPage"));
 const Flashcards = React.lazy(
   () => import("./features/flashcards/FlashcardsPage"),

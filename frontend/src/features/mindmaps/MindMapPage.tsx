@@ -13,8 +13,8 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { toast } from "sonner";
-import { useStore } from "../../store";
-import { api, json } from "../../api";
+import { useStore } from "../../lib/store";
+import { api, json } from "../../lib/api";
 import { Title, Evidence, useArtifacts } from "../study/StudyShared";
 
 export default function MindMap() {

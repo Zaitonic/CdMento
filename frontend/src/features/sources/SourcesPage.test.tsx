@@ -3,8 +3,8 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SourcesPage from "./SourcesPage";
-import { useStore } from "../../store";
-import { api, waitForJob } from "../../api";
+import { useStore } from "../../lib/store";
+import { api, waitForJob } from "../../lib/api";
 vi.mock("../../api", () => ({
   api: vi.fn(),
   waitForJob: vi.fn(),

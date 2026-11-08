@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 const apiMock = vi.hoisted(() => vi.fn());
 vi.mock("./api", () => ({ api: apiMock, json: JSON.stringify }));
 
-import { activeNotebookKey, useStore } from "./store";
+import { activeNotebookKey, useStore } from "./lib/store";
 
 const notebooks = [
   { id: "a", name: "Alpha", color: "purple" },

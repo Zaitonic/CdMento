@@ -12,8 +12,8 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useStore } from "../../store";
-import { api, json, waitForJob } from "../../api";
+import { useStore } from "../../lib/store";
+import { api, json, waitForJob } from "../../lib/api";
 import { useAI, AIAccess } from "../ai/AIAccess";
 type Citation = {
   source_id: string;

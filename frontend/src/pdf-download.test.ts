@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { ApiError, sourceFile } from "./api";
+import { ApiError, sourceFile } from "./lib/api";
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();

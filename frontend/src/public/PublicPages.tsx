@@ -46,13 +46,13 @@ import {
   updateProfile,
   verifyPasswordResetCode,
 } from "firebase/auth";
-import { firebaseAuth } from "./auth";
-import { api, ApiError } from "./api";
-import { useSession } from "./Session";
-import { safeNext } from "./paths";
+import { firebaseAuth } from "../lib/auth";
+import { api, ApiError } from "../lib/api";
+import { useSession } from "../lib/Session";
+import { safeNext } from "../lib/paths";
 import { FlashcardDemo, QuizDemo } from "./ProgrammingDemos";
 import { FlowingPaths } from "./FlowingPaths";
-import { LogoMark } from "./LogoMark";
+import { LogoMark } from "../ui/LogoMark";
 import { initScrollEffects } from "./scroll-effects.js";
 import TopoBackground from "./TopoBackground";
 import { ThemeToggle } from "./PublicTheme";

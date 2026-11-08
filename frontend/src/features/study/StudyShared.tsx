@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { FileText, X, Sparkles } from "lucide-react";
-import { useStore } from "../../store";
-import { api, json, waitForJob } from "../../api";
+import { useStore } from "../../lib/store";
+import { api, json, waitForJob } from "../../lib/api";
 import { useAI, AIAccess } from "../ai/AIAccess";
 
 export function Title({

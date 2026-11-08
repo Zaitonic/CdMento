@@ -18,7 +18,7 @@ import {
   ClipboardList,
   Network,
 } from "lucide-react";
-import { useStore } from "../../store";
+import { useStore } from "../../lib/store";
 import NotebookLibrary from "../notebooks/NotebookLibrary";
 const tools = [
   {

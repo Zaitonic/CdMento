@@ -1,4 +1,4 @@
-import { usePublicTheme } from "./PublicTheme";
+import { usePublicTheme } from "../public/PublicTheme";
 
 export function LogoMark({ tone = "theme" }: { tone?: "theme" | "brand" }) {
   const { theme } = usePublicTheme();

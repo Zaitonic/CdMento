@@ -15,8 +15,8 @@ import {
   Settings,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, json } from "../../api";
-import { useStore } from "../../store";
+import { api, json } from "../../lib/api";
+import { useStore } from "../../lib/store";
 import { Title, Evidence, useArtifacts } from "../study/StudyShared";
 
 type ManualCard = {

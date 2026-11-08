@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../../api";
-import { useStore } from "../../store";
+import { api } from "../../lib/api";
+import { useStore } from "../../lib/store";
 import { Loader2, RefreshCw, WifiOff } from "lucide-react";
 
 export type AIStatus = {

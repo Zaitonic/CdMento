@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { ArrowRight, CheckCircle2, Sparkles, Check, Plus, X, Settings } from "lucide-react";
 import { toast } from "sonner";
-import { api, json } from "../../api";
+import { api, json } from "../../lib/api";
 import { Title, Evidence, useArtifacts } from "../study/StudyShared";
-import { useStore } from "../../store";
+import { useStore } from "../../lib/store";
 
 type ManualQuizQuestion = {
   question: string;

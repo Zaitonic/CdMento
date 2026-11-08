@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { waitForJob } from "./api";
+import { waitForJob } from "./lib/api";
 
 afterEach(() => {
   vi.useRealTimers();

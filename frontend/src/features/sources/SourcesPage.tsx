@@ -17,8 +17,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useStore, type Source } from "../../store";
-import { api, json, sourceFile, waitForJob } from "../../api";
+import { useStore, type Source } from "../../lib/store";
+import { api, json, sourceFile, waitForJob } from "../../lib/api";
 
 import ReviewerPanel from "./ReviewerPanel";
 

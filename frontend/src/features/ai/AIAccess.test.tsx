@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AIAccess, useAI } from "./AIAccess";
-import { api } from "../../api";
+import { api } from "../../lib/api";
 vi.mock("../../api", () => ({ api: vi.fn(), json: JSON.stringify }));
 const status = {
   configured: true,

@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { SessionProvider, useSession } from "./Session";
-import { api, setToken } from "./api";
-import { useStore } from "./store";
+import { SessionProvider, useSession } from "./lib/Session";
+import { api, setToken } from "./lib/api";
+import { useStore } from "./lib/store";
 vi.mock("./auth", () => ({ firebaseAuth: null }));
 vi.mock("./api", () => ({
   api: vi.fn(),

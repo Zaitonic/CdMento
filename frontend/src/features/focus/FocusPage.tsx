@@ -1,8 +1,8 @@
 import { useEffect, useState, useRef } from "react";
 import { Plus, Play, Pause, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
-import { api, json } from "../../api";
-import { useStore } from "../../store";
+import { api, json } from "../../lib/api";
+import { useStore } from "../../lib/store";
 
 export default function Focus() {
   const [mode, setMode] = useState(25);

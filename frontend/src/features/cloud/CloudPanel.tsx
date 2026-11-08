@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { X, LogOut, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
-import { useSession } from "./Session";
+import { useSession } from "../../lib/Session";
 export default function CloudPanel({ close }: { close: () => void }) {
   const { user: firebaseUser, demo, logout } = useSession();
   const user = firebaseUser || demo;

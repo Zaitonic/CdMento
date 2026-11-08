@@ -10,7 +10,7 @@ import {
   List,
   BookOpen,
 } from "lucide-react";
-import { useStore } from "../../store";
+import { useStore } from "../../lib/store";
 
 type Props = {
   search: string;
