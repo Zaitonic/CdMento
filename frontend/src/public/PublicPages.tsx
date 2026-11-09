@@ -883,6 +883,11 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
   const [error, setError] = useState("");
   const [fields, setFields] = useState<Record<string, string>>({});
   const [sent, setSent] = useState(false);
+  const [pendingGoogle, setPendingGoogle] = useState<{
+    credential: string;
+    email: string;
+    displayName: string;
+  } | null>(null);
   const [demoAvailable, setDemoAvailable] = useState(false);
   const [authMode, setAuthMode] = useState("checking");
   const [healthAttempt, retryHealth] = useState(0);
@@ -917,6 +922,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
     setPassword("");
     setConfirm("");
     setSent(false);
+    setPendingGoogle(null);
     document.title = `${signup ? "Create your account" : reset ? "Reset your password" : "Welcome back"} — CdMento`;
   }, [mode]);
   if (!loading && accountUser && !reset && !busy)
@@ -1061,7 +1067,29 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
     setError("");
     setBusy(true);
     try {
-      await loginGoogle(credential, remember);
+      const preview = await loginGoogle(credential, remember);
+      if (preview) {
+        setPendingGoogle({
+          credential,
+          email: preview.email,
+          displayName: preview.display_name,
+        });
+      } else {
+        navigate(next, { replace: true });
+      }
+    } catch (e) {
+      setError(authError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function createGoogleAccount() {
+    if (!pendingGoogle) return;
+    setError("");
+    setBusy(true);
+    try {
+      await loginGoogle(pendingGoogle.credential, remember, true);
+      setPendingGoogle(null);
       navigate(next, { replace: true });
     } catch (e) {
       setError(authError(e));
@@ -1134,6 +1162,45 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
               Back to log in <ArrowRight size={16} />
             </Link>
           </div>
+        ) : pendingGoogle ? (
+          <section className="auth-google-confirmation" aria-labelledby="google-signup-title">
+            <h2 id="google-signup-title">Create your CdMento account?</h2>
+            <p>
+              You’re creating a new account with this Google profile. Your CdMento
+              account will be created when you continue.
+            </p>
+            <div className="auth-google-identity">
+              <GoogleIcon size={22} />
+              <span>
+                <strong>{pendingGoogle.displayName}</strong>
+                <small>{pendingGoogle.email}</small>
+              </span>
+            </div>
+            {error && <p className="auth-error" role="alert">{error}</p>}
+            <button
+              className="pub-button auth-submit"
+              type="button"
+              disabled={busy}
+              onClick={createGoogleAccount}
+            >
+              {busy ? (
+                <><LoaderCircle className="loading-spin" size={18} /> Creating account…</>
+              ) : (
+                <>Create account with Google <ArrowRight size={18} /></>
+              )}
+            </button>
+            <button
+              className="auth-text-button auth-google-cancel"
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setPendingGoogle(null);
+                setError("");
+              }}
+            >
+              Cancel
+            </button>
+          </section>
         ) : (
           <>
             {!reset && googleMode && (

@@ -19,7 +19,7 @@ class GoogleAuth:
         self.attempts = defaultdict(deque)
         self.lock = threading.RLock()
 
-    def login(self, credential, remember, client):
+    def _throttle(self, client):
         now = time.time()
         with self.lock:
             attempts = self.attempts[client]
@@ -29,6 +29,8 @@ class GoogleAuth:
                 raise HTTPException(429, "Too many sign-in attempts. Please retry shortly.")
             attempts.append(now)
 
+    def _verify(self, credential, client):
+        self._throttle(client)
         try:
             from google.auth.transport.requests import Request
             from google.oauth2 import id_token
@@ -43,22 +45,19 @@ class GoogleAuth:
         email = claims.get("email", "").strip().casefold()
         if not subject or not email or claims.get("email_verified") is not True:
             raise HTTPException(401, "Use a Google account with a verified email address.")
+        return subject, email, claims.get("name", "").strip()[:80]
 
-        uid = "google_" + hashlib.sha256(subject.encode()).hexdigest()
-        account = {
-            "id": uid,
-            "email": email,
-            "display_name": claims.get("name", "").strip()[:80] or email.split("@")[0],
-            "email_verified": True,
-            "updated_at": now,
-        }
-        previous = self.repo.get(AUTH_OWNER, "accounts", uid) or {}
-        self.repo.put(
-            AUTH_OWNER,
-            "accounts",
-            {**previous, **account, "created_at": previous.get("created_at", now)},
-        )
+    @staticmethod
+    def email_id(email):
+        return hashlib.sha256(email.strip().casefold().encode()).hexdigest()
 
+    def _password_account_exists(self, email):
+        return self.repo.get(
+            "__email_password_auth__", "accounts", self.email_id(email)
+        ) is not None
+
+    def _session(self, account, remember):
+        now = time.time()
         token = "google_" + secrets.token_urlsafe(32)
         expires_at = now + (30 * 24 * 60 * 60 if remember else 12 * 60 * 60)
         self.repo.put(
@@ -66,13 +65,78 @@ class GoogleAuth:
             "sessions",
             {
                 "id": hashlib.sha256(token.encode()).hexdigest(),
-                "uid": uid,
-                "email": email,
+                "uid": account["id"],
+                "email": account["email"],
                 "name": account["display_name"],
                 "expires_at": expires_at,
             },
         )
-        return {"token": token, "profile": self.profile(uid)}
+        return {"token": token, "profile": self.profile(account["id"])}
+
+    def prepare(self, credential, remember, client):
+        subject, email, name = self._verify(credential, client)
+        uid = "google_" + hashlib.sha256(subject.encode()).hexdigest()
+        account = self.repo.get(AUTH_OWNER, "accounts", uid)
+        if account:
+            return {"requires_signup": False, **self._session(account, remember)}
+        if self._password_account_exists(email):
+            raise HTTPException(
+                409,
+                "An account already uses this email. Sign in with email and password.",
+            )
+        return {
+            "requires_signup": True,
+            "email": email,
+            "display_name": name or email.split("@")[0],
+        }
+
+    def register(self, credential, remember, client):
+        subject, email, name = self._verify(credential, client)
+        uid = "google_" + hashlib.sha256(subject.encode()).hexdigest()
+        account = self.repo.get(AUTH_OWNER, "accounts", uid)
+        if account:
+            return {"requires_signup": False, **self._session(account, remember)}
+        if self._password_account_exists(email):
+            raise HTTPException(
+                409,
+                "An account already uses this email. Sign in with email and password.",
+            )
+
+        now = time.time()
+        account = {
+            "id": uid,
+            "email": email,
+            "display_name": name or email.split("@")[0],
+            "email_verified": True,
+            "updated_at": now,
+            "created_at": now,
+        }
+        self.repo.put(AUTH_OWNER, "accounts", account)
+        return {"requires_signup": False, **self._session(account, remember)}
+
+    def login(self, credential, remember, client):
+        subject, email, name = self._verify(credential, client)
+        uid = "google_" + hashlib.sha256(subject.encode()).hexdigest()
+        account = self.repo.get(AUTH_OWNER, "accounts", uid)
+        if not account:
+            if self._password_account_exists(email):
+                raise HTTPException(
+                    409,
+                    "An account already uses this email. Sign in with email and password.",
+                )
+            raise HTTPException(404, "No CdMento account uses this Google account yet.")
+
+        account = self.repo.put(
+            AUTH_OWNER,
+            "accounts",
+            {
+                **account,
+                "email": email,
+                "display_name": name or account["display_name"],
+                "updated_at": time.time(),
+            },
+        )
+        return self._session(account, remember)
 
     def resolve(self, token):
         session_id = hashlib.sha256(token.encode()).hexdigest()

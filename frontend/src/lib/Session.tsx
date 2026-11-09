@@ -40,6 +40,11 @@ type GoogleProfile = {
   emailVerified: true;
   kind: "google";
 };
+type GoogleSignupPreview = {
+  requires_signup: true;
+  email: string;
+  display_name: string;
+};
 type PasswordProfile = {
   uid: string;
   email: string;
@@ -117,7 +122,11 @@ const Session = createContext({
     _password: string,
     _remember: boolean,
   ) => {},
-  loginGoogle: async (_credential: string, _remember: boolean) => {},
+  loginGoogle: async (
+    _credential: string,
+    _remember: boolean,
+    _createAccount = false,
+  ): Promise<GoogleSignupPreview | null> => null,
   loginPassword: async (_email: string, _password: string, _remember: boolean) => {},
 });
 export const useSession = () => useContext(Session);
@@ -345,11 +354,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setDemo(result.profile);
     setLoading(false);
   }
-  async function loginGoogle(credential: string, remember: boolean) {
-    const result = await api<{ token: string; profile: GoogleProfile }>(
-      "/auth/google/login",
+  async function loginGoogle(
+    credential: string,
+    remember: boolean,
+    createAccount = false,
+  ) {
+    const result = await api<
+      | { requires_signup: true; email: string; display_name: string }
+      | { requires_signup: false; token: string; profile: GoogleProfile }
+    >(
+      createAccount ? "/auth/google/register" : "/auth/google/prepare",
       { method: "POST", body: json({ credential, remember }) },
     );
+    if (result.requires_signup) return result;
     useStore.getState().clearSession();
     clearDemoStorage();
     clearGoogleStorage();
@@ -367,6 +384,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setUser(result.profile);
     setProvider("google");
     setLoading(false);
+    return null;
   }
   async function loginPassword(email: string, password: string, remember: boolean) {
     const result = await api<{ token: string; profile: PasswordProfile }>(

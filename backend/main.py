@@ -329,6 +329,18 @@ def create_app(config=None, services=None):
             raise HTTPException(404, "Google sign-in is not enabled.")
         return app.state.google_auth
 
+    @app.post("/api/v1/auth/google/prepare")
+    def google_prepare(data: S.GoogleLogin, request: Request):
+        auth = google_auth(request)
+        client = request.client.host if request.client else "unknown"
+        return auth.prepare(data.credential, data.remember, client)
+
+    @app.post("/api/v1/auth/google/register")
+    def google_register(data: S.GoogleLogin, request: Request):
+        auth = google_auth(request)
+        client = request.client.host if request.client else "unknown"
+        return auth.register(data.credential, data.remember, client)
+
     @app.post("/api/v1/auth/google/login")
     def google_login(data: S.GoogleLogin, request: Request):
         auth = google_auth(request)

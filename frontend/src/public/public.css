@@ -1178,6 +1178,56 @@
 .auth-provider-option .auth-divider {
   margin-top: 17px;
 }
+.auth-google-confirmation {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 26px;
+  padding: 20px;
+  border: 1px solid #e6dfe9;
+  border-radius: 12px;
+  background: #fffdfa;
+}
+.auth-google-confirmation h2 {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.35;
+}
+.auth-google-confirmation > p:not(.auth-error) {
+  margin: 0;
+  color: #776b80;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.auth-google-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #eee8f1;
+  border-radius: 9px;
+}
+.auth-google-identity > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.auth-google-identity strong,
+.auth-google-identity small {
+  overflow-wrap: anywhere;
+}
+.auth-google-identity strong {
+  font-size: 12px;
+}
+.auth-google-identity small {
+  color: #877c90;
+  font-size: 11px;
+}
+.auth-google-cancel {
+  align-self: center;
+  min-height: 44px;
+}
 .auth-label {
   display: flex;
   flex-direction: column;

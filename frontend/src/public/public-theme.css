@@ -542,6 +542,19 @@
   border-color: #8c5e62;
   color: #e7bcc0;
 }
+:root[data-public-theme="dark"] .public-site .auth-google-confirmation {
+  background: #1c2327;
+  border-color: #38454d;
+}
+:root[data-public-theme="dark"] .public-site .auth-google-confirmation > p:not(.auth-error) {
+  color: #aebbc3;
+}
+:root[data-public-theme="dark"] .public-site .auth-google-identity {
+  border-color: #38454d;
+}
+:root[data-public-theme="dark"] .public-site .auth-google-identity small {
+  color: #a0b0ba;
+}
 :root[data-public-theme="dark"] .public-site .auth-field-error {
   color: #e3a6ad;
 }
