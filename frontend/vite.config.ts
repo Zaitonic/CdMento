@@ -15,6 +15,6 @@ export default defineConfig({
     outDir: fileURLToPath(new URL("../build/web", import.meta.url)),
     emptyOutDir: true,
   },
-  server: { host: "127.0.0.1", proxy: { "/api": "http://127.0.0.1:8000" } },
-  preview: { host: "127.0.0.1", proxy: { "/api": "http://127.0.0.1:8000" } },
+  server: { host: "localhost", proxy: { "/api": "http://127.0.0.1:8000" } },
+  preview: { host: "localhost", proxy: { "/api": "http://127.0.0.1:8000" } },
 });

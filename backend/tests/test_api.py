@@ -129,6 +129,15 @@ def test_new_workspace_empty_and_notebook_persists(env):
     assert client.post("/api/v1/notebooks", json={"name": "   "}).status_code == 422
 
 
+def test_serverless_poll_resumes_queued_job_and_preserves_ownership(env, monkeypatch):
+    client, services, _ = env
+    n, sid = seed(client, services)
+    job = services.enqueue("alice", "ingest", notebook=n["id"], source_id=sid)
+    monkeypatch.setenv("VERCEL", "1")
+    assert client.get(f"/api/v1/jobs/{job['id']}", headers={"X-Test-User": "bob"}).status_code == 404
+    assert client.get(f"/api/v1/jobs/{job['id']}").json()["status"] == "completed"
+
+
 def test_owner_isolation_across_data_and_jobs(env):
     client, services, _ = env
     n, sid = seed(client, services)

@@ -76,7 +76,7 @@ export function GoogleSignInButton({
           size: "large",
           shape: "pill",
           text: "continue_with",
-          width: Math.min(420, Math.max(280, container.current.clientWidth)),
+          width: Math.min(400, Math.max(280, container.current.clientWidth)),
         });
       })
       .catch((error: unknown) => {

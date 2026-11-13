@@ -4,7 +4,7 @@ CdMento supports both direct Google sign-in and email/password accounts through 
 
 ## Google OAuth setup
 
-In Google Cloud Console, create an OAuth client with application type **Web application**. Add `http://localhost:5173` to Authorized JavaScript origins for local development, plus the deployed website origin when available. Google requires an OAuth client ID and an authorized origin for the Sign In With Google button. See [Google Identity Services setup](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid).
+In Google Cloud Console, create an OAuth client with application type **Web application**. Add both `http://localhost:5173` and `http://127.0.0.1:5173` to Authorized JavaScript origins for local development, plus the deployed website origin when available. Google requires an OAuth client ID and an authorized origin for the Sign In With Google button; an origin that is missing from this list makes the button fail with `The given origin is not allowed for the given client ID`. The Vite dev server uses `http://localhost:5173`. See [Google Identity Services setup](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid).
 
 Add the same web client ID to the private root `.env`:
 
@@ -15,7 +15,7 @@ VITE_GOOGLE_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
 BREVO_API_KEY=your-private-brevo-api-key
 BREVO_SENDER_EMAIL=verified-sender@example.com
 BREVO_SENDER_NAME=CdMento
-APP_BASE_URL=http://127.0.0.1:5173
+APP_BASE_URL=http://localhost:5173
 ```
 
 In Brevo, activate transactional email and verify the sender address or domain first. Keep `BREVO_API_KEY` private. Restart the backend and Vite after saving `.env`. The Google client ID is public app configuration; no Google client secret is used by this sign-in flow.

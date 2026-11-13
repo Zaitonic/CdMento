@@ -1,6 +1,11 @@
+import truststore
+
+truststore.inject_into_ssl()
+
 import copy
 import hashlib
 import json
+import os
 import threading
 import time
 from collections import defaultdict, deque
@@ -975,6 +980,10 @@ def create_app(config=None, services=None):
 
     @app.get("/api/v1/jobs/{jid}")
     def job(jid: str, owner: Owner):
+        current = owned(owner, "jobs", jid)
+        # Serverless instances have no persistent worker; polling resumes due work.
+        if os.getenv("VERCEL") == "1" and current["status"] in ("queued", "waiting", "processing"):
+            service.run_job(owner, jid)
         return {k: v for k, v in owned(owner, "jobs", jid).items() if k != "checkpoint"}
 
     @app.get("/api/v1/notebooks/{nid}/jobs")
@@ -996,6 +1005,9 @@ def create_app(config=None, services=None):
             from .tasks import celery_app
 
             celery_app.send_task("cdmento.run_job", args=[owner, jid])
+        elif os.getenv("VERCEL") == "1":
+            service.run_job(owner, jid)
+            job = owned(owner, "jobs", jid)
         return job
 
     @app.post("/api/v1/notebooks/{nid}/notes", status_code=201)

@@ -101,7 +101,7 @@ From the repository root, install the frontend and Python dependencies, then cre
 ```powershell
 npm ci
 py -3.13 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements-dev.txt
 Copy-Item .env.example .env
 npm run dev:all
 ```

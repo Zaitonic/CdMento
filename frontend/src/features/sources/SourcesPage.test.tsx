@@ -51,9 +51,9 @@ it("keeps reviewer generation disabled while exposing upload and paste", () => {
 });
 it("saves pasted material through the existing document ingestion pipeline", async () => {
   vi.mocked(api).mockImplementation(async (path) =>
-    path.endsWith("/sources")
+    path.endsWith("/complete")
       ? { source: { id: "source-test" }, job_id: "job-test" }
-      : path === "/ai/status"
+      : path.endsWith("/upload-sessions") ? { id: "upload-test" } : path === "/ai/status"
         ? {
             configured: false,
             free_only: true,
@@ -74,16 +74,16 @@ it("saves pasted material through the existing document ingestion pipeline", asy
   await waitFor(() => expect(waitForJob).toHaveBeenCalledWith("job-test"));
   const [path, request] = vi
     .mocked(api)
-    .mock.calls.find(([path]) => path.endsWith("/sources"))!;
-  expect(path).toBe("/notebooks/notebook-test/sources");
+    .mock.calls.find(([path]) => path.endsWith("/parts/0"))!;
+  expect(path).toBe("/notebooks/notebook-test/sources/upload-sessions/upload-test/parts/0");
+  expect(api).toHaveBeenCalledWith("/notebooks/notebook-test/sources/upload-sessions", expect.objectContaining({body: JSON.stringify({name: "JavaScript basics.txt", size: 23})}));
   const file = (request?.body as FormData).get("file") as File;
-  expect(file.name).toBe("JavaScript basics.txt");
   expect(file.size).toBe(23);
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 it("preserves pasted text if the upload fails", async () => {
   vi.mocked(api).mockImplementation(async (path) => {
-    if (path.endsWith("/sources")) throw new Error("Connection interrupted");
+    if (path.endsWith("/upload-sessions")) throw new Error("Connection interrupted");
     return path === "/ai/status"
       ? {
           configured: false,

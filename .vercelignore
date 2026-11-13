@@ -1,0 +1,14 @@
+.env
+.env.*
+.venv/
+.git/
+.cache/
+node_modules/
+backend/data/
+backend/tests/
+artifacts/
+docs/
+*.sqlite3*
+*service-account*.json
+frontend/public/gsi-test*.html
+frontend/vite.https.config.ts

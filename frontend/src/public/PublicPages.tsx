@@ -1155,7 +1155,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
             <h3>{signup ? "Verify your email." : "Check your inbox."}</h3>
             <p>
               {signup
-                ? `We sent a verification link to ${email}. Open it before logging in.`
+                ? `If this email can be registered, a verification link will arrive at ${email}. Check your spam folder, and open the link before logging in.`
                 : `If an account exists for ${email}, you’ll receive a password reset link. Check your spam folder too.`}
             </p>
             <Link className="pub-button" to={`/login${suffix}`}>

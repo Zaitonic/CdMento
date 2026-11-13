@@ -10,6 +10,7 @@ from collections import defaultdict, deque
 from urllib.parse import quote
 
 from fastapi import HTTPException
+from .repository import Conflict
 
 
 AUTH_OWNER = "__email_password_auth__"
@@ -45,9 +46,6 @@ class PasswordAuth:
 
     def _new_action(self, account, action, lifetime):
         token = secrets.token_urlsafe(32)
-        for previous in self.repo.list(AUTH_OWNER, "actions"):
-            if previous["uid"] == account["uid"] and previous["action"] == action:
-                self.repo.delete(AUTH_OWNER, "actions", previous["id"])
         self.repo.put(
             AUTH_OWNER,
             "actions",
@@ -61,6 +59,8 @@ class PasswordAuth:
         return token
 
     def _send_action(self, account, action):
+        previous = [item for item in self.repo.list(AUTH_OWNER, "actions")
+                    if item["uid"] == account["uid"] and item["action"] == action]
         token = self._new_action(account, action, 24 * 3600 if action == "verify" else 3600)
         mode = "verifyEmail" if action == "verify" else "resetPassword"
         link = f"{self.app_base_url}/auth/action?mode={mode}&token={quote(token)}"
@@ -75,6 +75,9 @@ class PasswordAuth:
             f"Hi {account['display_name']},\n\n{label}: {link}\n\n"
             "If you did not request this, you can ignore this email.",
         )
+        # Keep earlier links usable when delivery fails or times out.
+        for item in previous:
+            self.repo.delete(AUTH_OWNER, "actions", item["id"])
 
     def signup(self, email, password, name, client):
         self._throttle(("signup", client), 8, 600, "Too many requests. Please wait ten minutes.")
@@ -85,6 +88,9 @@ class PasswordAuth:
             if not account["email_verified"]:
                 self._send_action(account, "verify")
             return {"message": "If this email can be registered, check your inbox for next steps."}
+        if any(item.get("email", "").casefold() == email
+               for item in self.repo.list("__google_auth__", "accounts")):
+            raise HTTPException(409, "This email uses Google sign-in. Continue with Google to open your existing account.")
         salt = secrets.token_hex(16)
         account = {
             "id": account_id,
@@ -181,8 +187,12 @@ class PasswordAuth:
     def _consume_action(self, token, expected):
         action_id = hashlib.sha256(token.encode()).hexdigest()
         action = self.repo.get(AUTH_OWNER, "actions", action_id)
-        if not action or action["action"] != expected or action["expires_at"] <= time.time():
+        if not action or action.get("consumed") or action["action"] != expected or action["expires_at"] <= time.time():
             raise HTTPException(400, "This link is invalid or expired. Request a new one.")
+        try:
+            self.repo.put(AUTH_OWNER, "actions", {**action, "consumed": True}, expected=action["revision"])
+        except Conflict:
+            raise HTTPException(400, "This link is invalid or expired. Request a new one.") from None
         self.repo.delete(AUTH_OWNER, "actions", action_id)
         if expected == "verify":
             account_id = action["uid"].removeprefix("email_")

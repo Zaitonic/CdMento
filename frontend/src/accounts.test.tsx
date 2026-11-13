@@ -62,7 +62,7 @@ function page(mode: "login" | "signup" | "reset") {
 }
 async function credentials(user: ReturnType<typeof userEvent.setup>) {
   await user.type(
-    screen.getByLabelText("Email address"),
+    await screen.findByLabelText("Email address"),
     "learner@example.com",
   );
   await user.type(
@@ -105,7 +105,7 @@ describe("configured account flows", () => {
   it("creates the account, updates the name, and requests verification", async () => {
     const user = userEvent.setup();
     page("signup");
-    await user.type(screen.getByLabelText("Your name"), "Curious Learner");
+    await user.type(await screen.findByLabelText("Your name"), "Curious Learner");
     await credentials(user);
     await user.type(
       screen.getByLabelText("Confirm password", { exact: true }),
@@ -123,7 +123,7 @@ describe("configured account flows", () => {
     const user = userEvent.setup();
     page("reset");
     await user.type(
-      screen.getByLabelText("Email address"),
+      await screen.findByLabelText("Email address"),
       "learner@example.com",
     );
     await user.click(screen.getByRole("button", { name: "Send reset link" }));
@@ -138,7 +138,7 @@ describe("configured account flows", () => {
     const user = userEvent.setup();
     page("reset");
     await user.type(
-      screen.getByLabelText("Email address"),
+      await screen.findByLabelText("Email address"),
       "unknown@example.com",
     );
     await user.click(screen.getByRole("button", { name: "Send reset link" }));
@@ -151,7 +151,7 @@ describe("configured account flows", () => {
     const user = userEvent.setup();
     page("login");
     await user.click(
-      screen.getByRole("button", { name: "Continue with Google" }),
+      await screen.findByRole("button", { name: "Continue with Google" }),
     );
     expect(await screen.findByText("Your notes workspace")).toBeTruthy();
     expect(mocks.popup).toHaveBeenCalledOnce();
@@ -165,7 +165,7 @@ describe("configured account flows", () => {
     const user = userEvent.setup();
     page("login");
     await user.click(
-      screen.getByRole("button", { name: "Continue with Google" }),
+      await screen.findByRole("button", { name: "Continue with Google" }),
     );
     expect(screen.queryByRole("alert")).toBeNull();
   });
@@ -174,7 +174,7 @@ describe("configured account flows", () => {
     const user = userEvent.setup();
     page("login");
     await user.click(
-      screen.getByRole("button", { name: "Continue with Google" }),
+      await screen.findByRole("button", { name: "Continue with Google" }),
     );
     expect(mocks.redirect).toHaveBeenCalledOnce();
   });

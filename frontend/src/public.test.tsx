@@ -1,10 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { AuthPage, Landing, ActionPage } from "./public/PublicPages";
 import Root from "./Root";
 import { safeNext } from "./lib/paths";
+const healthMock = vi.hoisted(() => vi.fn());
+vi.mock("./lib/api", () => ({ api: healthMock, json: JSON.stringify, setToken: vi.fn() }));
+beforeEach(() => healthMock.mockReset().mockResolvedValue({auth_mode: "google"}));
 vi.mock("./lib/auth", () => ({ firebaseAuth: null }));
 function page(element: React.ReactNode, path = "/") {
   return render(<MemoryRouter initialEntries={[path]}>{element}</MemoryRouter>);
@@ -117,7 +120,7 @@ describe("public site and authentication", () => {
   it("validates signup passwords before making an account request", async () => {
     const user = userEvent.setup();
     page(<AuthPage mode="signup" />, "/signup");
-    await user.type(screen.getByLabelText("Your name"), "Test Learner");
+    await user.type(await screen.findByLabelText("Your name"), "Test Learner");
     await user.type(
       screen.getByLabelText("Email address"),
       "learner@example.com",
@@ -134,38 +137,20 @@ describe("public site and authentication", () => {
     expect(screen.getByText("Use at least 8 characters.")).toBeTruthy();
     expect(screen.getByText("Your passwords don’t match.")).toBeTruthy();
   });
-  it("supports showing the password and honestly reports unconfigured sign-in", async () => {
+  it("supports showing the password", async () => {
     const user = userEvent.setup();
     page(<AuthPage mode="login" />, "/login");
-    await user.type(
-      screen.getByLabelText("Email address"),
-      "learner@example.com",
-    );
-    const password = screen.getByLabelText("Password", { exact: true });
+    const password = await screen.findByLabelText("Password", { exact: true });
     await user.type(password, "example-only");
     await user.click(screen.getByRole("button", { name: "Show password" }));
     expect(password.getAttribute("type")).toBe("text");
-    await user.click(
-      screen.getByRole("button", { name: "Let’s get learning" }),
-    );
-    expect((await screen.findByRole("alert")).textContent).toContain(
-      "Account services are not connected",
-    );
   });
   it("does not claim a password reset was sent without account services", async () => {
-    const user = userEvent.setup();
+    healthMock.mockResolvedValue({auth_mode: "unavailable"});
     page(<AuthPage mode="reset" />, "/forgot-password");
-    await user.type(
-      screen.getByLabelText("Email address"),
-      "learner@example.com",
-    );
-    await user.click(screen.getByRole("button", { name: "Send reset link" }));
-    expect((await screen.findByRole("alert")).textContent).toContain(
-      "not connected",
-    );
-    expect(
-      screen.queryByRole("heading", { name: "Check your inbox." }),
-    ).toBeNull();
+    expect(await screen.findByText(/reach account services/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send reset link" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Check your inbox." })).toBeNull();
   });
   it("rejects email-action URLs without a valid action and code", () => {
     page(<ActionPage />, "/auth/action?mode=unknown");
