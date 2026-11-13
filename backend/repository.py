@@ -1,7 +1,9 @@
 """Owner-scoped records with compare-and-swap updates in SQLite or Firestore."""
 
 import copy
+import hashlib
 import json
+import re
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -11,6 +13,16 @@ from uuid import uuid4
 
 class Conflict(Exception):
     pass
+
+
+_RESERVED_FIRESTORE_ID = re.compile(r"^__.*__$")
+
+
+def firestore_id(value):
+    """Firestore rejects IDs that start and end with double underscores."""
+    if _RESERVED_FIRESTORE_ID.match(value):
+        return "enc_" + hashlib.sha256(value.encode()).hexdigest()
+    return value
 
 
 class Repository:
@@ -86,7 +98,11 @@ class FirestoreRepository:
         self.db, self.bucket = db, bucket
 
     def collection(self, owner, kind):
-        return self.db.collection("users").document(owner).collection(kind)
+        return (
+            self.db.collection("users")
+            .document(firestore_id(owner))
+            .collection(kind)
+        )
 
     def decode(self, data):
         if data and "_blob" in data:
@@ -103,7 +119,9 @@ class FirestoreRepository:
         return data
 
     def get(self, owner, kind, identifier):
-        snapshot = self.collection(owner, kind).document(identifier).get()
+        snapshot = (
+            self.collection(owner, kind).document(firestore_id(identifier)).get()
+        )
         return self.decode(snapshot.to_dict()) if snapshot.exists else None
 
     def list(self, owner, kind):
@@ -121,7 +139,7 @@ class FirestoreRepository:
     def put(self, owner, kind, value, expected=None):
         from google.cloud import firestore
 
-        reference = self.collection(owner, kind).document(value["id"])
+        reference = self.collection(owner, kind).document(firestore_id(value["id"]))
         value = copy.deepcopy(value)
         # Firestore free-tier projects can store large records in private chunks.
         blob_path = None
@@ -211,7 +229,7 @@ class FirestoreRepository:
         return value
 
     def delete(self, owner, kind, identifier):
-        ref = self.collection(owner, kind).document(identifier)
+        ref = self.collection(owner, kind).document(firestore_id(identifier))
         snapshot = ref.get()
         if snapshot.exists:
             data = snapshot.to_dict()

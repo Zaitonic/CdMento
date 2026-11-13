@@ -320,11 +320,11 @@ def create_app(config=None, services=None):
             except Exception as error:
                 checks[name] = f"{type(error).__name__}: {error}"
 
-        probe("repo_read", lambda: repo.list("__diagnostics__", "probe"))
+        probe("repo_read", lambda: repo.list("diagnostics", "probe"))
 
         def repo_write():
-            record = repo.put("__diagnostics__", "probe", {"id": "check", "at": time.time()})
-            repo.delete("__diagnostics__", "probe", record["id"])
+            record = repo.put("diagnostics", "probe", {"id": "check", "at": time.time()})
+            repo.delete("diagnostics", "probe", record["id"])
 
         probe("repo_write", repo_write)
 
