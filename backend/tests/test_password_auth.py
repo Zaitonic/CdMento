@@ -70,3 +70,24 @@ def test_google_user_cannot_create_duplicate_password_account(auth):
     assert error.value.status_code == 409
     assert auth.repo.list(AUTH_OWNER, "accounts") == []
     auth.mailer.send.assert_not_called()
+
+
+def test_unverified_account_can_reset_and_becomes_verified(auth):
+    auth.signup("student@example.com", "original-password", "Student", "test")
+    auth.mailer.reset_mock()
+    auth.request_reset("student@example.com", "test")
+    auth.mailer.send.assert_called_once()
+    auth.reset_password(last_token(auth), "replacement-password")
+    session = auth.login("student@example.com", "replacement-password", "test", False)
+    assert session["profile"]["emailVerified"] is True
+
+
+def test_google_account_reset_request_explains_google_signin(auth):
+    auth.repo.put(
+        "__google_auth__", "accounts", {"id": "google_user", "email": "student@example.com"}
+    )
+    with pytest.raises(HTTPException) as error:
+        auth.request_reset("Student@Example.com", "test")
+    assert error.value.status_code == 409
+    assert "Google" in error.value.detail
+    auth.mailer.send.assert_not_called()

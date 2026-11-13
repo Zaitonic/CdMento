@@ -14,6 +14,10 @@ from .repository import Conflict
 
 
 AUTH_OWNER = "__email_password_auth__"
+GOOGLE_AUTH_OWNER = "__google_auth__"
+GOOGLE_ACCOUNT_MESSAGE = (
+    "This email uses Google sign-in. Continue with Google to open your existing account."
+)
 
 
 class PasswordAuth:
@@ -58,6 +62,12 @@ class PasswordAuth:
         )
         return token
 
+    def _google_account_exists(self, email):
+        return any(
+            item.get("email", "").casefold() == email
+            for item in self.repo.list(GOOGLE_AUTH_OWNER, "accounts")
+        )
+
     def _send_action(self, account, action):
         previous = [item for item in self.repo.list(AUTH_OWNER, "actions")
                     if item["uid"] == account["uid"] and item["action"] == action]
@@ -88,9 +98,8 @@ class PasswordAuth:
             if not account["email_verified"]:
                 self._send_action(account, "verify")
             return {"message": "If this email can be registered, check your inbox for next steps."}
-        if any(item.get("email", "").casefold() == email
-               for item in self.repo.list("__google_auth__", "accounts")):
-            raise HTTPException(409, "This email uses Google sign-in. Continue with Google to open your existing account.")
+        if self._google_account_exists(email):
+            raise HTTPException(409, GOOGLE_ACCOUNT_MESSAGE)
         salt = secrets.token_hex(16)
         account = {
             "id": account_id,
@@ -163,19 +172,33 @@ class PasswordAuth:
         self._throttle(("reset", client), 5, 600, "Too many requests. Please wait ten minutes.")
         email = email.strip().casefold()
         account = self.repo.get(AUTH_OWNER, "accounts", self.email_id(email))
-        if account and account["email_verified"]:
+        if account:
+            # Send to unverified accounts too: a link delivered to the mailbox is
+            # the same proof of ownership that verification asks for, so resetting
+            # also verifies the address. Otherwise a forgotten password on a
+            # never-verified signup could never be recovered.
             self._send_action(account, "reset")
+        elif self._google_account_exists(email):
+            raise HTTPException(409, GOOGLE_ACCOUNT_MESSAGE)
         return {"message": "If an account exists for this email, reset instructions will be sent."}
 
     def reset_password(self, token, password):
         uid = self._consume_action(token, "reset")
         account_id = uid.removeprefix("email_")
         account = self.repo.get(AUTH_OWNER, "accounts", account_id)
+        if not account:
+            raise HTTPException(400, "This link is invalid or expired. Request a new one.")
         salt = secrets.token_hex(16)
         self.repo.put(
             AUTH_OWNER,
             "accounts",
-            {**account, "salt": salt, "password_hash": self.password_hash(password, salt)},
+            {
+                **account,
+                "salt": salt,
+                "password_hash": self.password_hash(password, salt),
+                # Opening a link delivered to the mailbox proves ownership.
+                "email_verified": True,
+            },
         )
         for session in self.repo.list(AUTH_OWNER, "sessions"):
             if session["uid"] == uid:

@@ -1130,7 +1130,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
             <p>
               {signup
                 ? `If this email can be registered, a verification link will arrive at ${email}. Check your spam folder, and open the link before logging in.`
-                : `If an account exists for ${email}, you’ll receive a password reset link. Check your spam folder too.`}
+                : `If an account exists for ${email}, you’ll receive a password reset link. Check your spam folder too. If you normally sign in with Google, use Continue with Google instead.`}
             </p>
             <Link className="pub-button" to={`/login${suffix}`}>
               Back to log in <ArrowRight size={16} />
