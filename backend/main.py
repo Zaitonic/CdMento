@@ -298,8 +298,8 @@ def create_app(config=None, services=None):
         return value
 
     @app.get("/api/v1/health")
-    def health():
-        return {
+    def health(deep: int = 0):
+        result = {
             "status": "ok",
             "backend": "python",
             "auth_mode": service.settings.auth_mode,
@@ -309,6 +309,41 @@ def create_app(config=None, services=None):
             and app.state.demo_auth.available(),
             "email_configured": app.state.brevo_mailer.configured,
         }
+        if not deep:
+            return result
+        checks = {}
+
+        def probe(name, action):
+            try:
+                action()
+                checks[name] = "ok"
+            except Exception as error:
+                checks[name] = f"{type(error).__name__}: {error}"
+
+        probe("repo_read", lambda: repo.list("__diagnostics__", "probe"))
+
+        def repo_write():
+            record = repo.put("__diagnostics__", "probe", {"id": "check", "at": time.time()})
+            repo.delete("__diagnostics__", "probe", record["id"])
+
+        probe("repo_write", repo_write)
+
+        def google_certs():
+            from google.auth.transport.requests import Request
+
+            Request()(url="https://www.googleapis.com/oauth2/v3/certs")
+
+        probe("google_certs", google_certs)
+        checks["google_client_id"] = (
+            "set" if service.settings.google_client_id else "missing"
+        )
+        result["status"] = (
+            "ok"
+            if all(value == "ok" for key, value in checks.items() if key != "google_client_id")
+            else "degraded"
+        )
+        result["checks"] = checks
+        return result
 
     def local_demo(request):
         if (
