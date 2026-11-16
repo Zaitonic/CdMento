@@ -12,11 +12,33 @@ createRoot(document.getElementById("root")!).render(
 );
 
 if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
+  if (import.meta.env.PROD) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker
+        .register("/sw.js", { updateViaCache: "none" })
+        .catch(() => {
+          // Service worker registration is optional.
+        });
+    });
+  } else {
+    // In development a stale worker can serve cached modules and break HMR.
+    // Release it once per tab, then reload without the worker in control.
     navigator.serviceWorker
-      .register("/sw.js")
+      .getRegistrations()
+      .then(async (registrations) => {
+        if (!registrations.length) return;
+        await Promise.all(registrations.map((registration) => registration.unregister()));
+        if ("caches" in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((key) => caches.delete(key)));
+        }
+        if (!sessionStorage.getItem("cdmento-sw-reset")) {
+          sessionStorage.setItem("cdmento-sw-reset", "1");
+          window.location.reload();
+        }
+      })
       .catch(() => {
-        // Service worker registration optional/silent in dev
+        // Cleanup is best-effort; the dev server still works without it.
       });
-  });
+  }
 }

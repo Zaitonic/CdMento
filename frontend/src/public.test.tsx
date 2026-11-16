@@ -68,7 +68,7 @@ describe("public site and authentication", () => {
   it("lets visitors study programming cards and complete a scored quiz", async () => {
     const user = userEvent.setup();
     page(<Landing />);
-    expect(screen.getByText("Card 1 of 5")).toBeTruthy();
+    expect(await screen.findByText("Card 1 of 5")).toBeTruthy();
     await user.click(
       screen.getByRole("button", { name: "Reveal flashcard answer" }),
     );

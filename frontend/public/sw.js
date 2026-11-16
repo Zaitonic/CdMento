@@ -1,5 +1,6 @@
 // CdMento Progressive Web App Service Worker
-const CACHE_NAME = "cdmento-app-v1";
+// Bump the version whenever the caching strategy changes so old caches purge.
+const CACHE_NAME = "cdmento-app-v2";
 const STATIC_ASSETS = [
   "/",
   "/workspace",
@@ -50,7 +51,18 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 3. For navigation (HTML document): Network-first with offline cache fallback
+  // 3. Skip dev-server modules and cache-busted URLs. The Vite dev server
+  //    rewrites these constantly; caching them serves stale code after edits.
+  if (
+    url.search ||
+    url.pathname.startsWith("/src/") ||
+    url.pathname.startsWith("/@") ||
+    url.pathname.startsWith("/node_modules/")
+  ) {
+    return;
+  }
+
+  // 4. For navigation (HTML document): Network-first with offline cache fallback
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request).catch(() => {
@@ -62,7 +74,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 4. Static assets (JS, CSS, images, fonts): Cache-first with network fallback
+  // 5. Static assets (JS, CSS, images, fonts): Cache-first with network fallback
   event.respondWith(
     caches.match(request).then((cachedResponse) => {
       if (cachedResponse) {
