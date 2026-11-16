@@ -12,6 +12,9 @@ let token = "";
 export function setToken(value: string) {
   token = value;
 }
+export function authHeaders(): Record<string, string> {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 export async function api<T = any>(
   path: string,
   init: RequestInit = {},

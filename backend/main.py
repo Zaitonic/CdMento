@@ -29,6 +29,7 @@ from .google_auth import GoogleAuth
 from .password_auth import PasswordAuth
 from .brevo import BrevoMailer
 from .documents import reading_sections
+from .scholar import ScholarSearch
 from .providers.gateway import AIUnavailable, AIRefused
 
 
@@ -123,6 +124,7 @@ def create_app(config=None, services=None):
     repo = service.repo
     locks = defaultdict(threading.RLock)
     requests = defaultdict(deque)
+    searches = defaultdict(deque)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -134,6 +136,7 @@ def create_app(config=None, services=None):
 
     app = FastAPI(title="CdMento API", version="1.0.0", lifespan=lifespan)
     app.state.services = service
+    app.state.scholar = ScholarSearch(service.settings.semantic_scholar_api_key)
     app.state.demo_auth = DemoAuth(repo)
     app.state.google_auth = GoogleAuth(repo, service.settings.google_client_id)
     app.state.brevo_mailer = BrevoMailer(
@@ -281,6 +284,38 @@ def create_app(config=None, services=None):
             "automatic": True,
             "approved_providers": approved,
         }
+
+    @app.get("/api/v1/search/{source}")
+    def search_proxy(source: str, query: str, request: Request, owner: Owner):
+        scholar = request.app.state.scholar
+        if source not in scholar.sources:
+            raise HTTPException(404, "Unknown search source.")
+        with locks["limits"]:
+            queue = searches[owner]
+            while queue and queue[0] < time.time() - 60:
+                queue.popleft()
+            if len(queue) >= 30:
+                raise HTTPException(
+                    429,
+                    {
+                        "error": "Please wait a minute before running more searches.",
+                        "kind": "rate_limit",
+                    },
+                )
+            queue.append(time.time())
+        try:
+            body, media_type = scholar.fetch(source, query)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from None
+        except Exception:
+            raise HTTPException(
+                502,
+                {
+                    "error": "This source is unavailable right now.",
+                    "kind": "unavailable",
+                },
+            ) from None
+        return Response(content=body, media_type=media_type)
 
     def public_source(source):
         return {

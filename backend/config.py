@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     freellmapi_base_url: str = "http://127.0.0.1:3001/v1"
     freellmapi_model: str = "ministral-8b-latest"
     freellmapi_free_tier_confirmed: bool = False
+    semantic_scholar_api_key: str = ""
     ai_daily_requests: int = Field(default=100, ge=1, le=1000)
     ai_max_output_tokens: int = Field(default=2400, ge=512, le=4096)
     redis_url: str = ""

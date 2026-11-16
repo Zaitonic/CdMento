@@ -19,6 +19,7 @@ import {
   Network,
   Timer,
   Search,
+  Telescope,
   Sun,
   Moon,
   PanelLeftClose,
@@ -56,11 +57,15 @@ const Flashcards = React.lazy(
 const Quiz = React.lazy(() => import("./features/quizzes/QuizPage"));
 const MindMap = React.lazy(() => import("./features/mindmaps/MindMapPage"));
 const Focus = React.lazy(() => import("./features/focus/FocusPage"));
+const MentoSearch = React.lazy(() =>
+  import("./features/mentosearch/MentoSearchPage"),
+);
 
 const nav = [
   ["/workspace", "Home", Home],
   ["/notebooks", "Notebooks", FolderOpen],
   ["/sources", "Sources", Files],
+  ["/search", "MentoSearch", Telescope],
   ["/chat", "AI Assistant", MessageCircle],
   ["/notes", "Notes", NotebookPen],
   ["/flashcards", "Flashcards", Layers],
@@ -706,7 +711,7 @@ export default function App() {
 
               {s.ready &&
                 s.active &&
-                !["/workspace", "/notebooks", "/sources", "/profile"].includes(
+                !["/workspace", "/notebooks", "/sources", "/search", "/profile"].includes(
                   location.pathname,
                 ) && (
                   <div className="active-notebook">
@@ -810,6 +815,16 @@ export default function App() {
                       element={<MindMap key={s.active} />}
                     />
                     <Route path="/focus" element={<Focus />} />
+                    <Route
+                      path="/search"
+                      element={
+                        <React.Suspense
+                          fallback={<Empty text="Loading MentoSearch…" />}
+                        >
+                          <MentoSearch />
+                        </React.Suspense>
+                      }
+                    />
                     <Route
                       path="*"
                       element={
