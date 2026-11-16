@@ -56,32 +56,14 @@ Instead of juggling separate apps for notes, flashcards, PDF reading, and timers
 
 ## 🛠️ Tech Stack
 
-### Frontend
-- **Framework & Language**: React 19, TypeScript
-- **Build & Dev Tooling**: Vite
-- **Styling**: Tailwind CSS, Custom Modern Responsive CSS Design System
-- **State Management**: Zustand
-- **Routing**: React Router (v7)
-- **Rich-Text Editing**: TipTap (ProseMirror)
-- **Mind Mapping / Graphs**: @xyflow/react (React Flow)
-- **Animations & Icons**: Motion, Lucide React
-- **Document Rendering**: PDF.js (`pdfjs-dist`)
-- **PWA Architecture**: Web App Manifest, Service Worker API, Cache Storage API
-
-### Backend & API
-- **Language & Runtime**: Python 3.13
-- **Framework**: FastAPI (Asynchronous REST API)
-- **Data Validation & Schemas**: Pydantic v2
-- **Data Persistence**: SQLite (Local Database), Repository Architecture
-- **OCR Engine**: RapidOCR (ONNX Runtime, OpenCV, PyPDFium2)
-- **Spaced Repetition Engine**: PyFSRS
-- **Task Queue**: Celery & Redis support for durable background job processing
-
-### AI & Machine Learning Infrastructure
-- **Model Gateway**: Multi-provider failover routing with strict JSON-schema enforcement
-- **Primary AI Provider**: Cloudflare Workers AI (`llama-3.3-70b-instruct`)
-- **Supported Fallbacks**: Groq (`gpt-oss-120b`), OpenRouter Free Tier
-- **Safety & Verification**: Server-side output validation, citation checking, and token budgeting
+| Layer | Technologies |
+| --- | --- |
+| **Frontend** | React 19 · TypeScript · Vite 8 · Tailwind CSS 4 · Zustand · React Router 7 · TipTap (ProseMirror) · @xyflow/react (React Flow) · PDF.js (`pdfjs-dist`) · Motion · Lucide React |
+| **Backend** | Python 3.13 · FastAPI (async REST) · Pydantic v2 · SQLite · Firestore (hosted) · RapidOCR (ONNX Runtime, OpenCV, PyPDFium2) · PyFSRS · Celery + Redis |
+| **AI & Search** | Cloudflare Workers AI (`llama-3.3-70b-instruct`) · Groq (`gpt-oss-120b`) · OpenRouter free tier · multi-provider failover gateway with JSON-schema enforcement |
+| **Scholarly Sources** | Crossref · OpenAlex · Europe PMC · PubMed · arXiv · Semantic Scholar (optional API key) · Google Scholar link-out |
+| **PWA & Accessibility** | Web App Manifest · Service Worker precaching · WCAG AA contrast · 44px touch targets |
+| **Testing & Tooling** | Vitest + Testing Library · pytest · Prettier · TypeScript (`tsc --noEmit`) · GitHub · Vercel (optional hosting) |
 
 ---
 
