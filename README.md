@@ -281,3 +281,141 @@ flowchart LR
 ```
 
 The PWA sends authenticated requests to FastAPI. FastAPI verifies identity, applies account ownership checks, reads or writes records in Firestore, and stores source bytes privately. Document processing converts sources into extracted text before an AI request is made. The AI gateway uses configured providers and returns an unavailable state when no permitted provider can serve a request. Scholarly searches are proxied by FastAPI so browser CORS restrictions and API keys remain outside the client.
+
+---
+
+## Development Methodology
+
+CdMento follows an iterative, Agile-inspired development approach. Work is completed in small feature slices so the interface, API, persistence, and validation for a feature can be checked together before the next slice begins.
+
+| Phase | Activities | Outputs |
+| --- | --- | --- |
+| Planning | Identify study workflows, user needs, feature scope, privacy needs, and free-tier service limits. | Feature list, requirements, backlog, and deployment constraints. |
+| Design | Define the PWA/API boundary, account-scoped data model, document workflow, navigation, and visual system. | Architecture, data model, API contracts, component designs, and diagrams. |
+| Implementation | Build React feature pages and FastAPI endpoints in small increments; connect authentication, document processing, storage, and learning tools. | Working frontend and backend feature slices. |
+| Verification | Run TypeScript, Vitest, pytest, API checks, and manual workflow tests for sign-in, upload, study, and error states. | Test results, fixes, and validated behavior. |
+| Review and refinement | Use observed failures, usability feedback, and provider limitations to revise validation, messages, layouts, and retry paths. | Updated implementation and documentation. |
+| Release | Build the PWA, configure server-only environment variables, deploy the API and frontend, then test the hosted health and account flows. | Deployable release and operational checklist. |
+
+## System Architecture Design
+
+The final architecture uses a browser-based React PWA and a Python FastAPI service. The browser never receives email, database, storage, or AI-provider secrets. It sends authenticated requests to `/api/v1`; FastAPI verifies the caller, applies ownership checks, and communicates with persistence and approved external services.
+
+| Communication path | Design |
+| --- | --- |
+| Frontend to API | React uses HTTPS JSON requests and an authorization bearer token. Source upload uses authenticated multipart chunks. |
+| Authentication | Google Identity Services supplies an ID token that FastAPI verifies. Email/password sessions are managed by FastAPI; Brevo sends verification and reset links. Firebase Authentication can also be selected by environment configuration. |
+| API to persistence | The repository layer stores hosted data in Firestore. Local development can use SQLite through the same repository interface. |
+| API to source storage | `FileStorage` keeps original source bytes in configured private storage: Firebase Storage when configured, or private Vercel Blob for hosted Firestore storage. |
+| API to document pipeline | FastAPI reads private source bytes, extracts PDF/DOCX/TXT text, and invokes bundled OCR only when an eligible PDF page needs it. |
+| API to external providers | The AI gateway and scholarly search proxy make server-side allow-listed requests. Provider failures or quota exhaustion return a user-safe status instead of exposing credentials. |
+
+## Database Design
+
+CdMento uses a document-oriented model. In production, user data is stored in Firestore under an account-specific path. Local development uses SQLite records with the same owner, collection, identifier, and JSON payload model. The design avoids cross-user joins by placing each user's data in that user's document tree.
+
+### Entity Relationship Diagram / Data Model
+
+```mermaid
+flowchart TD
+    user[users/{uid}] --> profile[profile/account]
+    user --> notebook[notebooks/{notebookId}]
+    user --> task[tasks/{taskId}]
+    user --> focus[focus_sessions/{sessionId}]
+    user --> job[jobs/{jobId}]
+    user --> upload[upload_sessions/{uploadId}]
+
+    notebook --> source[sources/{sourceId}]
+    notebook --> note[notes/{noteId}]
+    notebook --> artifact[artifacts/{artifactId}]
+    notebook --> conversation[conversations/{notebookId}]
+    notebook --> map[maps/{notebookId}]
+    notebook --> attempt[attempts/{attemptId}]
+    notebook --> review[reviews/{eventId}]
+
+    source --> privateFile[Private original file]
+    artifact --> review
+    artifact --> attempt
+```
+
+`users/{uid}` is the account boundary. Each child name in the diagram is a Firestore subcollection, and each document has an `id`. Relationships are represented by stored identifiers such as `notebook`, `artifact_id`, `source_ids`, and `deck_id`; Firestore does not enforce foreign keys, so FastAPI validates ownership and parent existence before each operation.
+
+### Database Schema
+
+| Collection | Document ID | Main fields | Purpose |
+| --- | --- | --- | --- |
+| `profile` | `account` | `email`, `display_name`, `bio`, `study_goal`, `avatar`, `color`, timestamps | Stores account profile preferences. |
+| `notebooks` | notebook UUID or validated custom ID | `name`, `color`, `created_at`, `deleting`, `revision` | Groups a learner's study materials. |
+| `sources` | source UUID | `notebook`, `name`, `type`, `status`, `text`, `chunks`, `checksum`, `storage_key`, page and OCR metadata | Stores source metadata and extracted study text. |
+| `notes` | note UUID or validated custom ID | `notebook`, `title`, `content`, `document`, `updated_at`, `revision` | Stores rich-text notes and saved reviewers. |
+| `artifacts` | artifact UUID | `notebook`, `kind`, `title`, `source_ids`, generated `cards`, `questions`, or reviewer sections, `revision` | Stores flashcard decks, quizzes, guides, and generated mind-map content. |
+| `conversations` | notebook ID | `notebook`, `messages`, `summary`, `revision` | Stores source-grounded chat history for a notebook. |
+| `maps` | notebook ID | `notebook`, `nodes`, `edges`, `viewport`, `revision` | Stores one editable mind map per notebook. |
+| `attempts` | attempt UUID | `notebook`, `artifact_id`, `mode`, `status`, `questions`, `result`, timestamps | Stores a quiz attempt and its result. |
+| `reviews` | client review event ID | `notebook`, `deck_id`, `card_id`, `rating`, `due`, `log`, `created_at` | Makes a flashcard review idempotent and preserves scheduler history. |
+| `focus_sessions` | session UUID | `notebook`, `duration`, `mode`, `status`, `remaining`, `deadline`, timestamps | Stores Pomodoro-style focus sessions. |
+| `tasks` | task UUID | `text`, `done`, `created_at`, `revision` | Stores personal tasks. |
+| `jobs` and `upload_sessions` | UUID | status, progress, source or request references, timestamps | Tracks document processing, AI work, and resumable uploads. |
+
+For records larger than Firestore's practical document limit, the repository stores a reference to private bucket content or uses a `record_payloads/{chunkId}/parts/{partId}` collection. Original uploaded file bytes are not embedded in Firestore documents.
+
+### Data Dictionary
+
+| Field | Type | Description | Constraint / generation |
+| --- | --- | --- | --- |
+| `id` | string | Unique document identifier. | Required; system-generated UUID unless a validated import or manual ID is accepted. |
+| `revision` | integer | Version number used for optimistic concurrency control. | System-generated and incremented on every successful repository write. |
+| `notebook` | string | Parent notebook identifier. | Required for notebook-bound sources, notes, artifacts, maps, attempts, conversations, and reviews. |
+| `name` / `title` | string | User-visible name for a notebook, source, note, deck, quiz, or reviewer. | Required where applicable; validated length limits depend on the request schema. |
+| `color` | enum string | Visual color selected for a profile or notebook. | One of `purple`, `blue`, `green`, `orange`, or `pink`. |
+| `type` | enum string | Source file format. | `pdf`, `docx`, or `txt`. |
+| `status` | enum string | State of a source, job, attempt, or focus session. | Server-controlled transitions such as `queued`, `extracting`, `ready`, `failed`, `active`, or `completed`. |
+| `text` | string | Extracted readable source text or plain note text. | Source text is generated by the document pipeline; note content is limited by request validation. |
+| `chunks` | array of objects | Source excerpts with page, section, and OCR metadata. | Generated during extraction and used for source grounding. |
+| `storage_key` | string | Private object-storage location of an original source file. | System-generated; never returned by public source responses. |
+| `source_ids` | array of strings | Sources used by an artifact, card, quiz question, or answer. | Must reference selected sources in the same notebook. |
+| `messages` | array of objects | User and assistant conversation entries. | Kept per notebook; server keeps recent history and a bounded summary. |
+| `created_at` / `updated_at` / `finished_at` | ISO-8601 timestamp string | Record lifecycle times. | System-generated by the backend. |
+| `checksum` | SHA-256 string | Digest of uploaded source bytes. | System-generated; used to identify duplicate uploads in a notebook. |
+
+### Database Implementation
+
+FastAPI accesses data only through `Repository` or `FirestoreRepository`. Both implementations expose `get`, `list`, `put`, and `delete`, so feature code does not need separate database logic for local and hosted modes. The Firestore implementation uses `users/{uid}/{collection}/{id}` paths and Firestore transactions for writes that require an expected `revision`.
+
+The authenticated user ID is passed to every repository operation. API helpers check the requested record and its parent notebook before returning, updating, or deleting it. This enforces account ownership at the API boundary. Pydantic request schemas reject unknown fields and validate lengths, ranges, enum values, IDs, duplicate quiz options, map relationships, and upload sizes before persistence. Deleting a notebook is handled as a job so related records and private source files can be removed in a controlled sequence.
+
+## User Interface and User Experience Design
+
+The interface is built around a learner's normal study sequence: enter a workspace, choose a notebook, add material, read or create learning activities, then return to the same notebook later. The public landing pages introduce the product and authentication routes; protected workspace pages use a consistent left navigation, notebook context, content area, and status feedback.
+
+The implemented React pages act as functional prototypes. The source reader uses an original-file and extracted-text view; notes use a focused editor; flashcards and quizzes use dedicated practice layouts; mind maps use an interactive graph; and the focus timer uses a task-oriented view. This keeps each learning activity visually appropriate while preserving the same account and notebook context.
+
+The layout adapts from desktop panels to a mobile navigation drawer at smaller widths. The public pages and workspace include responsive CSS breakpoints, touch-friendly controls, light and dark themes, visible focus treatment, and reduced-motion support through Motion's user preference setting.
+
+### User-Centered Design
+
+The following learner needs guide the implemented design decisions:
+
+| Learner need | Design response |
+| --- | --- |
+| Keep study material in one place | Notebook-scoped sources, notes, artifacts, tasks, and conversations. |
+| Understand difficult or scanned material | Split source reading, extracted text, OCR status, page information, and retry feedback. |
+| Turn passive reading into practice | Flashcards, quizzes, mind maps, reviewer guides, focus sessions, and tasks. |
+| Trust generated help | Source selection, citations, source references, provider status, and clear unavailable or quota messages. |
+| Study on different devices | PWA installation, responsive panels, mobile drawer navigation, accessible touch targets, and reduced-motion support. |
+
+The interface keeps error messages close to the action that caused them and offers recovery when available, such as retrying a source-processing job, retrying an unavailable connection, or requesting another password-reset link.
+
+### Navigation Design
+
+Public navigation provides the landing page, Get the app page, login, signup, forgot-password, email verification, and action-link routes. After authentication, the primary sidebar provides Home, Notebooks, Sources, MentoSearch, AI Assistant, Notes, Flashcards, Quizzes, Mind Maps, and Focus Timer. The bottom area provides profile access and logout.
+
+The selected notebook is the user’s working context. A learner can create or select a notebook from the sidebar, then reach Sources to add material, use AI Assistant or generated activities after the source is ready, and return to Notes or the home workspace without leaving the account. Unknown protected paths redirect the learner back to the workspace. On mobile, the sidebar becomes a dismissible navigation drawer.
+
+## Frontend Development
+
+The frontend uses React 19, TypeScript, Vite, React Router, Zustand, TipTap, React Flow, PDF.js, Motion, and Lucide icons. `BrowserRouter` separates public routes from the protected workspace, while heavier feature pages such as Profile, Notes, Flashcards, Quizzes, Mind Maps, Focus, and MentoSearch are lazy-loaded.
+
+`SessionProvider` manages local demo, Google, email/password, and Firebase session states. The shared API helper adds the bearer token to `/api/v1` calls, converts unsuccessful responses into typed errors, and protects original-file requests by sending the token in a request header rather than a URL. Forms and API inputs receive client feedback, while FastAPI's Pydantic schemas provide the authoritative server validation.
+
+The frontend polls processing jobs to show source and generation progress, uses toast and inline feedback for successful and failed actions, and supports retry paths for recoverable failures. In production, the PWA registers a service worker for offline asset caching; development mode removes stale workers so they do not interfere with hot reloading.
