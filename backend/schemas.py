@@ -323,3 +323,49 @@ class ReviewerBatch(Input):
         default_factory=list, max_length=8
     )
     warnings: list[str] = Field(default_factory=list, max_length=10)
+
+
+class SearchBriefInput(Input):
+    query: str = Field(min_length=2, max_length=200)
+    sources: list[str] = Field(default_factory=list, max_length=6)
+    sort: Literal["relevance", "newest"] = "relevance"
+
+    @field_validator("query")
+    @classmethod
+    def trim_query(cls, value):
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Enter a topic to search.")
+        return value
+
+
+class BriefPoint(Input):
+    """One idea in a brief. Empty evidence_ids means general knowledge."""
+
+    text: str = Field(
+        min_length=1,
+        max_length=800,
+        description=(
+            "One complete sentence of 10-30 words with a concrete definition, "
+            "example, component, or practical use. No vague filler."
+        ),
+    )
+    evidence_ids: list[str] = Field(default_factory=list, max_length=6)
+
+
+class BriefSection(Input):
+    heading: str = Field(min_length=1, max_length=120)
+    points: list[BriefPoint] = Field(min_length=1, max_length=6)
+
+
+class SearchBrief(Input):
+    title: str = Field(min_length=1, max_length=160)
+    overview: str = Field(
+        min_length=1,
+        max_length=1200,
+        description="2-4 plain-English sentences that define and introduce the topic.",
+    )
+    overview_evidence_ids: list[str] = Field(default_factory=list, max_length=8)
+    sections: list[BriefSection] = Field(min_length=1, max_length=6)
+    key_terms: list[str] = Field(default_factory=list, max_length=12)
+    further_reading: list[str] = Field(default_factory=list, max_length=8)

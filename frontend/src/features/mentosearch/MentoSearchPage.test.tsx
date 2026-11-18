@@ -1,8 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { BriefResponse } from "../../lib/api";
+import { searchBrief } from "../../lib/api";
 import MentoSearchPage from "./MentoSearchPage";
 import { runMentoSearch } from "./searchProviders";
+
+vi.mock("../../lib/api", () => ({
+  searchBrief: vi.fn(),
+}));
 
 vi.mock("./searchProviders", () => ({
   SOURCES: [
@@ -24,7 +30,54 @@ vi.mock("./searchProviders", () => ({
   runMentoSearch: vi.fn(),
 }));
 
-const result = {
+const briefResponse: BriefResponse = {
+  query: "IT fundamentals",
+  brief: {
+    title: "IT Fundamentals",
+    overview:
+      "Information technology covers hardware, software, networks, and data.",
+    overview_evidence_ids: ["ev-1"],
+    sections: [
+      {
+        heading: "Core areas",
+        points: [
+          {
+            text: "Hardware is the physical equipment used by a computer.",
+            evidence_ids: ["ev-1"],
+          },
+          {
+            text: "Security protects systems and information.",
+            evidence_ids: [],
+          },
+        ],
+      },
+    ],
+    key_terms: ["hardware", "software", "networks"],
+    further_reading: ["Information technology fundamentals"],
+  },
+  evidence: [
+    {
+      id: "ev-1",
+      source: "alpha",
+      title: "Information technology fundamentals",
+      authors: ["Ada Lovelace", "Grace Hopper"],
+      year: 2023,
+      venue: "Journal of IT",
+      doi: "10.1/it",
+      url: "https://example.org/it",
+      abstract: "A study of IT fundamentals.",
+      citations: 12,
+      scholar_url:
+        "https://scholar.google.com/scholar?q=Information%20technology%20fundamentals",
+    },
+  ],
+  coverage: { ok: ["alpha"], failed: [] },
+  support: "partial",
+  cached: false,
+  generated_at: "2026-11-18T00:00:00Z",
+};
+
+const paper = {
   id: "alpha-1",
   title: "Spaced repetition helps long-term recall",
   url: "https://example.org/paper/1",
@@ -38,9 +91,16 @@ const result = {
   rank: 0,
 };
 
+async function search(user: ReturnType<typeof userEvent.setup>, query = "IT fundamentals") {
+  await user.type(screen.getByRole("textbox", { name: "Search topics" }), query);
+  await user.click(screen.getByRole("button", { name: "Search" }));
+}
+
 beforeEach(() => {
   localStorage.clear();
   vi.mocked(runMentoSearch).mockReset();
+  vi.mocked(searchBrief).mockReset();
+  vi.mocked(searchBrief).mockResolvedValue(briefResponse);
 });
 
 describe("MentoSearch page", () => {
@@ -50,6 +110,7 @@ describe("MentoSearch page", () => {
 
     expect(screen.getByRole("heading", { name: "MentoSearch" })).toBeTruthy();
 
+    await user.click(screen.getByRole("button", { name: /Advanced sources/ }));
     const alpha = screen.getByRole("button", { name: /Alpha/ });
     const beta = screen.getByRole("button", { name: /Beta/ });
     expect(alpha.getAttribute("aria-pressed")).toBe("true");
@@ -62,106 +123,148 @@ describe("MentoSearch page", () => {
     expect(alpha.getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("runs a search with the selected sources and renders the results", async () => {
+  it("requests a topic brief and renders the answer with citations", async () => {
     const user = userEvent.setup();
-    vi.mocked(runMentoSearch).mockResolvedValue({
-      results: [result],
-      failedSources: [],
-      succeededCount: 1,
-    });
-
     render(<MentoSearchPage />);
-    await user.type(
-      screen.getByRole("textbox", { name: "Search topics" }),
-      "spaced repetition",
-    );
-    await user.click(screen.getByRole("button", { name: "Search" }));
+    await search(user);
 
-    expect(await screen.findByText(/Spaced repetition helps long-term recall/)).toBeTruthy();
-    expect(screen.getByText(/1 results for/)).toBeTruthy();
-    expect(screen.getByText(/Ada Lovelace, Grace Hopper/)).toBeTruthy();
-    expect(screen.getByText(/DOI: 10.1\/example/)).toBeTruthy();
+    expect(await screen.findByText("IT Fundamentals")).toBeTruthy();
+    expect(screen.getByText(/Information technology covers hardware/)).toBeTruthy();
+    expect(screen.getByText("Partial evidence")).toBeTruthy();
+    expect(screen.getByText("General knowledge")).toBeTruthy();
+    expect(
+      screen.getAllByRole("button", { name: "Show evidence 1" }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("link", { name: "Verify on Google Scholar" }).getAttribute("href"),
+    ).toBe(
+      "https://scholar.google.com/scholar?q=Information%20technology%20fundamentals",
+    );
     expect(
       screen.getByRole("link", { name: "Open in Google Scholar" }).getAttribute("href"),
-    ).toContain("scholar.google.com/scholar?q=spaced%20repetition");
+    ).toContain("scholar.google.com/scholar?q=IT%20fundamentals");
 
-    expect(runMentoSearch).toHaveBeenCalledTimes(1);
-    const [query, sources, signal] = vi.mocked(runMentoSearch).mock.calls[0];
-    expect(query).toBe("spaced repetition");
-    expect([...sources]).toEqual(["alpha"]);
+    expect(searchBrief).toHaveBeenCalledTimes(1);
+    const [query, sources, sort, signal] = vi.mocked(searchBrief).mock.calls[0];
+    expect(query).toBe("IT fundamentals");
+    expect(sources).toEqual(["alpha"]);
+    expect(sort).toBe("relevance");
     expect(signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("shows the provider error when the search fails", async () => {
+  it("highlights the evidence card when a citation is clicked", async () => {
     const user = userEvent.setup();
-    vi.mocked(runMentoSearch).mockRejectedValue(
-      new Error("Enable at least one trusted source to search."),
+    render(<MentoSearchPage />);
+    await search(user);
+
+    await user.click(
+      (
+        await screen.findAllByRole("button", { name: "Show evidence 1" })
+      )[0],
     );
 
+    const card = document.getElementById("evidence-ev-1");
+    expect(card?.className).toContain("active");
+  });
+
+  it("shows the evidence-only fallback banner", async () => {
+    const user = userEvent.setup();
+    vi.mocked(searchBrief).mockResolvedValue({
+      ...briefResponse,
+      support: "evidence-only",
+    });
     render(<MentoSearchPage />);
-    await user.type(
-      screen.getByRole("textbox", { name: "Search topics" }),
-      "quantum biology",
-    );
-    await user.click(screen.getByRole("button", { name: "Search" }));
+    await search(user);
 
     expect(
-      await screen.findByText("Enable at least one trusted source to search."),
+      await screen.findByText(/AI overview was unavailable/),
+    ).toBeTruthy();
+    expect(screen.getByText("Sources only")).toBeTruthy();
+  });
+
+  it("warns when no papers were retrieved for a general overview", async () => {
+    const user = userEvent.setup();
+    vi.mocked(searchBrief).mockResolvedValue({
+      ...briefResponse,
+      support: "general",
+      evidence: [],
+      brief: {
+        ...briefResponse.brief,
+        overview_evidence_ids: [],
+        sections: [
+          {
+            heading: "Core areas",
+            points: [{ text: "Hardware is physical.", evidence_ids: [] }],
+          },
+        ],
+      },
+    });
+    render(<MentoSearchPage />);
+    await search(user);
+
+    expect(await screen.findByText(/No matching papers were found/)).toBeTruthy();
+  });
+
+  it("shows a cached-result notice", async () => {
+    const user = userEvent.setup();
+    vi.mocked(searchBrief).mockResolvedValue({
+      ...briefResponse,
+      cached: true,
+    });
+    render(<MentoSearchPage />);
+    await search(user);
+
+    expect(
+      await screen.findByText("Cached answer from a recent search."),
     ).toBeTruthy();
   });
 
-  it("disables the submit button until a query is entered", async () => {
+  it("shows the API error when the brief fails", async () => {
     const user = userEvent.setup();
-    render(<MentoSearchPage />);
-
-    const submit = screen.getByRole("button", { name: "Search" }) as HTMLButtonElement;
-    expect(submit.disabled).toBe(true);
-
-    await user.type(
-      screen.getByRole("textbox", { name: "Search topics" }),
-      "memory",
+    vi.mocked(searchBrief).mockRejectedValue(
+      new Error("Search sources are unavailable right now."),
     );
-    expect(submit.disabled).toBe(false);
-  });
-
-  it("persists the selected sources and sort order", async () => {
-    const user = userEvent.setup();
     render(<MentoSearchPage />);
-
-    await user.click(screen.getByRole("button", { name: /Beta/ }));
-    await user.click(screen.getByRole("button", { name: "Newest" }));
+    await search(user);
 
     expect(
-      JSON.parse(localStorage.getItem("mentosearch-preferences:v2") || "{}"),
-    ).toEqual({ sources: ["alpha", "beta"], sort: "newest" });
+      await screen.findByText("Search sources are unavailable right now."),
+    ).toBeTruthy();
   });
 
-  it("warns when a trusted source is unavailable", async () => {
+  it("loads the paper list only when the Papers tab is opened", async () => {
     const user = userEvent.setup();
     vi.mocked(runMentoSearch).mockResolvedValue({
-      results: [],
-      failedSources: ["Alpha"],
-      succeededCount: 0,
+      results: [paper],
+      failedSources: [],
+      succeededCount: 1,
     });
-
     render(<MentoSearchPage />);
-    await user.type(
-      screen.getByRole("textbox", { name: "Search topics" }),
-      "spaced repetition",
-    );
-    await user.click(screen.getByRole("button", { name: "Search" }));
+    await search(user);
+    await screen.findByText("IT Fundamentals");
 
-    expect(await screen.findByText(/Alpha is unavailable right now/)).toBeTruthy();
-    expect(screen.getByText(/selected sources are unavailable/)).toBeTruthy();
+    expect(runMentoSearch).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("tab", { name: /Papers/ }));
+
+    expect(
+      await screen.findByText(/Spaced repetition helps long-term recall/),
+    ).toBeTruthy();
+    expect(screen.getByText(/1 paper for/)).toBeTruthy();
+    expect(screen.getByText(/DOI: 10.1\/example/)).toBeTruthy();
+    expect(runMentoSearch).toHaveBeenCalledTimes(1);
+    const [query, sources] = vi.mocked(runMentoSearch).mock.calls[0];
+    expect(query).toBe("IT fundamentals");
+    expect([...sources]).toEqual(["alpha"]);
   });
 
-  it("orders results newest first when the newest sort is selected", async () => {
+  it("orders papers newest first when the newest sort is selected", async () => {
     const user = userEvent.setup();
     vi.mocked(runMentoSearch).mockResolvedValue({
       results: [
-        result,
+        paper,
         {
-          ...result,
+          ...paper,
           id: "alpha-2",
           title: "Interleaving practice beats blocking",
           url: "https://example.org/paper/2",
@@ -175,12 +278,10 @@ describe("MentoSearch page", () => {
     });
 
     const { container } = render(<MentoSearchPage />);
+    await user.click(screen.getByRole("button", { name: /Advanced sources/ }));
     await user.click(screen.getByRole("button", { name: "Newest" }));
-    await user.type(
-      screen.getByRole("textbox", { name: "Search topics" }),
-      "spaced repetition",
-    );
-    await user.click(screen.getByRole("button", { name: "Search" }));
+    await search(user);
+    await user.click(screen.getByRole("tab", { name: /Papers/ }));
 
     await screen.findByText(/Interleaving practice beats blocking/);
     const titles = Array.from(container.querySelectorAll(".result-title")).map(
@@ -190,22 +291,63 @@ describe("MentoSearch page", () => {
     expect(titles[1]).toContain("Spaced repetition helps long-term recall");
   });
 
-  it("shows the no-results message only once", async () => {
+  it("warns when a paper source is unavailable", async () => {
     const user = userEvent.setup();
     vi.mocked(runMentoSearch).mockResolvedValue({
       results: [],
-      failedSources: [],
-      succeededCount: 1,
+      failedSources: ["Alpha"],
+      succeededCount: 0,
     });
-
     render(<MentoSearchPage />);
+    await search(user);
+    await user.click(await screen.findByRole("tab", { name: /Papers/ }));
+
+    expect(
+      await screen.findByText(/Alpha is unavailable right now/),
+    ).toBeTruthy();
+    expect(screen.getByText(/selected sources are unavailable/)).toBeTruthy();
+  });
+
+  it("disables the submit button until a query is entered", async () => {
+    const user = userEvent.setup();
+    render(<MentoSearchPage />);
+
+    const submit = screen.getByRole("button", {
+      name: "Search",
+    }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+
     await user.type(
       screen.getByRole("textbox", { name: "Search topics" }),
-      "nonexistent topic",
+      "memory",
     );
-    await user.click(screen.getByRole("button", { name: "Search" }));
+    expect(submit.disabled).toBe(false);
+  });
 
-    await screen.findByText(/No results found/);
-    expect(screen.getAllByText(/No results found/)).toHaveLength(1);
+  it("persists the selected sources and sort order", async () => {
+    const user = userEvent.setup();
+    render(<MentoSearchPage />);
+
+    await user.click(screen.getByRole("button", { name: /Advanced sources/ }));
+    await user.click(screen.getByRole("button", { name: /Beta/ }));
+    await user.click(screen.getByRole("button", { name: "Newest" }));
+
+    expect(
+      JSON.parse(localStorage.getItem("mentosearch-preferences:v2") || "{}"),
+    ).toEqual({ sources: ["alpha", "beta"], sort: "newest" });
+  });
+
+  it("asks the user to enable a source when none are selected", async () => {
+    const user = userEvent.setup();
+    render(<MentoSearchPage />);
+
+    await user.click(screen.getByRole("button", { name: /Advanced sources/ }));
+    await user.click(screen.getByRole("button", { name: /Alpha/ }));
+    await search(user);
+
+    expect(
+      screen.getByText("Enable at least one trusted source to search."),
+    ).toBeTruthy();
+    expect(searchBrief).not.toHaveBeenCalled();
   });
 });

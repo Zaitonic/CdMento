@@ -21,7 +21,7 @@ from fsrs import Scheduler, Card, Rating
 from .config import settings
 from .repository import Repository, FirestoreRepository, Conflict
 from .storage import FileStorage
-from .ai import AIService
+from .ai import AIService, extractive_brief
 from .services import Services, now, identifier
 from . import schemas as S
 from .demo_auth import DemoAuth
@@ -29,7 +29,7 @@ from .google_auth import GoogleAuth
 from .password_auth import PasswordAuth
 from .brevo import BrevoMailer
 from .documents import reading_sections
-from .scholar import ScholarSearch
+from .scholar import DEFAULT_EVIDENCE_SOURCES, ScholarSearch
 from .providers.gateway import AIUnavailable, AIRefused
 
 
@@ -125,6 +125,7 @@ def create_app(config=None, services=None):
     locks = defaultdict(threading.RLock)
     requests = defaultdict(deque)
     searches = defaultdict(deque)
+    briefs = defaultdict(deque)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -316,6 +317,96 @@ def create_app(config=None, services=None):
                 },
             ) from None
         return Response(content=body, media_type=media_type)
+
+    @app.post("/api/v1/search/brief")
+    def search_brief(data: S.SearchBriefInput, request: Request, owner: Owner):
+        scholar = request.app.state.scholar
+        chosen = [
+            source
+            for source in (data.sources or list(DEFAULT_EVIDENCE_SOURCES))
+            if source in scholar.evidence_sources
+        ]
+        if not chosen:
+            raise HTTPException(400, "Choose at least one known search source.")
+        with locks["limits"]:
+            queue = briefs[owner]
+            while queue and queue[0] < time.time() - 3600:
+                queue.popleft()
+            if len(queue) >= 10:
+                raise HTTPException(
+                    429,
+                    {
+                        "error": "You can create 10 topic briefs per hour. Please try again later.",
+                        "kind": "rate_limit",
+                        "retry_after": max(1, int(queue[0] + 3600 - time.time())),
+                    },
+                )
+            queue.append(time.time())
+        key = hashlib.sha256(
+            f"{data.query.casefold()}|{','.join(chosen)}|{data.sort}".encode()
+        ).hexdigest()
+        cached = repo.get(owner, "search_cache", key)
+        if (
+            cached
+            and cached.get("expires_at", 0) > time.time()
+            and cached.get("body")
+        ):
+            return {**cached["body"], "cached": True}
+        try:
+            result = scholar.evidence(data.query, chosen, data.sort)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from None
+        except Exception:
+            raise HTTPException(
+                502,
+                {
+                    "error": "Search sources are unavailable right now.",
+                    "kind": "unavailable",
+                },
+            ) from None
+        evidence = result["evidence"]
+        brief, support, ai_info = None, "general", None
+        topic_brief = getattr(service.ai, "topic_brief", None)
+        if topic_brief:
+            try:
+                generated = topic_brief(data.query, evidence)
+                brief = generated["brief"]
+                support = generated["support"]
+                ai_info = generated.get("_ai")
+            except Exception:
+                brief = None
+        if brief is None and evidence:
+            brief = extractive_brief(data.query, evidence)
+            support = "evidence-only"
+        if brief is None:
+            raise HTTPException(
+                503,
+                {
+                    "error": "No sources were found and the AI overview is unavailable. Try another topic or source.",
+                    "kind": "connection",
+                },
+            )
+        body = {
+            "query": data.query,
+            "brief": brief,
+            "evidence": evidence,
+            "coverage": result["coverage"],
+            "support": support,
+            "cached": False,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if ai_info:
+            body["ai"] = ai_info
+        try:
+            repo.put(
+                owner,
+                "search_cache",
+                {"id": key, "expires_at": time.time() + 86400, "body": body},
+            )
+        except Exception:
+            # A cache write failure must never break a successful brief.
+            pass
+        return body
 
     def public_source(source):
         return {
