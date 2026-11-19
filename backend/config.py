@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     worker_enabled: bool = True
     ocr_enabled: bool = True
     ocr_max_pages: int = Field(default=100, ge=1, le=200)
+    admin_emails: str = "lozadamarklaurence226@gmail.com,admin@cdmento.com,admin@cdmento.local,demo@cdmento.local"
 
     def validate_modes(self):
         if self.auth_mode not in ("local", "google", "firebase") or self.data_backend not in (

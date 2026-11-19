@@ -33,6 +33,7 @@ import {
   Download,
   LogOut,
   MoreHorizontal,
+  Shield,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -60,6 +61,7 @@ const Focus = React.lazy(() => import("./features/focus/FocusPage"));
 const MentoSearch = React.lazy(() =>
   import("./features/mentosearch/MentoSearchPage"),
 );
+const AdminPanel = React.lazy(() => import("./features/admin/AdminPanel"));
 
 const nav = [
   ["/workspace", "Home", Home],
@@ -336,6 +338,19 @@ export default function App() {
   useEffect(() => {
     document.title = `${title} — CdMento`;
   }, [title]);
+  if (location.pathname.startsWith("/admin")) {
+    return (
+      <React.Suspense
+        fallback={
+          <div style={{ padding: "60px", textAlign: "center", color: "#64748b" }}>
+            Loading Admin Console…
+          </div>
+        }
+      >
+        <AdminPanel />
+      </React.Suspense>
+    );
+  }
   return (
     <>
       <input
@@ -387,6 +402,18 @@ export default function App() {
                 {path === "/chat" && <span className="ai-label">AI</span>}
               </NavLink>
             ))}
+            {account?.is_admin && (
+              <NavLink
+                to="/admin"
+                style={{ color: "#7c3aed", fontWeight: 600 }}
+              >
+                <Shield size={19} />
+                <span>Admin Panel</span>
+                <span className="ai-label" style={{ background: "#7c3aed" }}>
+                  ADMIN
+                </span>
+              </NavLink>
+            )}
           </nav>
           <div className="recent-label">
             YOUR NOTEBOOKS
@@ -553,6 +580,18 @@ export default function App() {
                     >
                       Your account
                     </button>
+                    {account?.is_admin && (
+                      <button
+                        style={{ color: "#7c3aed", fontWeight: 600 }}
+                        onClick={() => {
+                          setProfile(false);
+                          navigate("/admin");
+                        }}
+                      >
+                        <Shield size={14} />
+                        Admin Dashboard
+                      </button>
+                    )}
                     <button
                       className="secondary"
                       onClick={() => {

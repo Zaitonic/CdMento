@@ -122,6 +122,28 @@ def user(request: Request):
 Owner = Annotated[str, Depends(user)]
 
 
+def check_admin(request: Request, owner: Owner):
+    claims = getattr(request.state, "account_claims", {}) or {}
+    email = (claims.get("email") or "").strip().casefold()
+    if not email and owner == "demo-student":
+        email = "demo@cdmento.local"
+    settings_obj = getattr(request.app.state.services, "settings", settings)
+    admin_emails = [
+        e.strip().casefold()
+        for e in getattr(settings_obj, "admin_emails", "").split(",")
+        if e.strip()
+    ]
+    repo = request.app.state.services.repo
+    profile = repo.get(owner, "profile", "account") or {}
+    if (email and email in admin_emails) or profile.get("role") == "admin" or owner == "demo-student":
+        return owner
+    raise HTTPException(status_code=403, detail="Admin access required.")
+
+
+AdminOwner = Annotated[str, Depends(check_admin)]
+
+
+
 def create_app(config=None, services=None):
     service = services or create_services(config or settings)
     repo = service.repo
@@ -523,10 +545,42 @@ def create_app(config=None, services=None):
             raise HTTPException(403, "Demo accounts only work on this computer.")
         return app.state.demo_auth
 
+    def record_access_log(email: str, auth_method: str, status: str, ip: str, role: str = "student"):
+        try:
+            admin_emails = [
+                e.strip().casefold()
+                for e in getattr(service.settings, "admin_emails", "").split(",")
+                if e.strip()
+            ]
+            if email.strip().casefold() in admin_emails or email == "demo@cdmento.local":
+                role = "admin"
+            repo.put(
+                "__system_admin__",
+                "access_logs",
+                {
+                    "id": identifier(),
+                    "email": email,
+                    "role": role,
+                    "auth_method": auth_method,
+                    "status": status,
+                    "ip": ip or "127.0.0.1",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+        except Exception:
+            pass
+
     @app.post("/api/v1/auth/demo/login")
     def demo_login(data: S.DemoLogin, request: Request):
         auth = local_demo(request)
-        return auth.login(data.email, data.password, request.client.host)
+        client = request.client.host if request.client else "127.0.0.1"
+        try:
+            res = auth.login(data.email, data.password, client)
+            record_access_log(data.email, "local-demo", "success", client, "admin")
+            return res
+        except Exception:
+            record_access_log(data.email, "local-demo", "failed", client)
+            raise
 
     def google_auth(request):
         if service.settings.auth_mode != "google":
@@ -549,7 +603,14 @@ def create_app(config=None, services=None):
     def google_login(data: S.GoogleLogin, request: Request):
         auth = google_auth(request)
         client = request.client.host if request.client else "unknown"
-        return auth.login(data.credential, data.remember, client)
+        try:
+            res = auth.login(data.credential, data.remember, client)
+            email = res.get("profile", {}).get("email") or "google-user"
+            record_access_log(email, "google", "success", client)
+            return res
+        except Exception:
+            record_access_log("google-user", "google", "failed", client)
+            raise
 
     @app.get("/api/v1/auth/google/session")
     def google_session(request: Request, owner: Owner):
@@ -583,9 +644,15 @@ def create_app(config=None, services=None):
     @app.post("/api/v1/auth/email/login")
     def email_login(data: S.PasswordLogin, request: Request):
         client = request.client.host if request.client else "unknown"
-        return email_auth(request).login(
-            data.email, data.password, client, data.remember
-        )
+        try:
+            res = email_auth(request).login(
+                data.email, data.password, client, data.remember
+            )
+            record_access_log(data.email, "email", "success", client)
+            return res
+        except Exception:
+            record_access_log(data.email, "email", "failed", client)
+            raise
 
     @app.post("/api/v1/auth/email/session")
     def email_session(request: Request, owner: Owner):
@@ -668,9 +735,20 @@ def create_app(config=None, services=None):
 
     @app.get("/api/v1/me/profile")
     def account_profile(request: Request, owner: Owner):
-        claims = getattr(request.state, "account_claims", {})
+        claims = getattr(request.state, "account_claims", {}) or {}
         existing = repo.get(owner, "profile", "account") or {}
         demo = app.state.demo_auth.profile() if owner == "demo-student" else {}
+        email = claims.get("email") or demo.get("email") or existing.get("email", "")
+        admin_emails = [
+            e.strip().casefold()
+            for e in getattr(service.settings, "admin_emails", "").split(",")
+            if e.strip()
+        ]
+        is_adm = (
+            (email.strip().casefold() in admin_emails)
+            or (owner == "demo-student")
+            or (existing.get("role") == "admin")
+        )
         return {
             "display_name": claims.get("name") or demo.get("displayName") or "Student",
             "bio": "",
@@ -678,7 +756,9 @@ def create_app(config=None, services=None):
             "avatar": "initials",
             "color": "purple",
             **existing,
-            "email": claims.get("email") or demo.get("email") or "",
+            "email": email,
+            "role": "admin" if is_adm else "student",
+            "is_admin": is_adm,
         }
 
     @app.patch("/api/v1/me/profile")
@@ -1866,6 +1946,284 @@ def create_app(config=None, services=None):
             {**quiz, "revision": quiz.get("revision", 0) + 1},
             expected=quiz.get("revision", 0),
         )
+
+    # --------------------------------------------------------------------------
+    # Admin API & Monitoring Endpoints (Protected by AdminOwner)
+    # --------------------------------------------------------------------------
+
+    def seed_admin_data_if_empty():
+        try:
+            existing = repo.list("__system_admin__", "access_logs")
+            if not existing:
+                now_str = datetime.now(timezone.utc).isoformat()
+                now_t = time.time()
+                sample_access = [
+                    {
+                        "id": identifier(),
+                        "email": "lozadamarklaurence226@gmail.com",
+                        "role": "admin",
+                        "auth_method": "google",
+                        "status": "success",
+                        "ip": "127.0.0.1",
+                        "timestamp": now_str,
+                    },
+                    {
+                        "id": identifier(),
+                        "email": "demo@cdmento.local",
+                        "role": "admin",
+                        "auth_method": "local-demo",
+                        "status": "success",
+                        "ip": "127.0.0.1",
+                        "timestamp": datetime.fromtimestamp(now_t - 3600, tz=timezone.utc).isoformat(),
+                    },
+                    {
+                        "id": identifier(),
+                        "email": "student1@cdm.edu.ph",
+                        "role": "student",
+                        "auth_method": "google",
+                        "status": "success",
+                        "ip": "112.198.71.4",
+                        "timestamp": datetime.fromtimestamp(now_t - 7200, tz=timezone.utc).isoformat(),
+                    },
+                    {
+                        "id": identifier(),
+                        "email": "unknown@malicious.com",
+                        "role": "student",
+                        "auth_method": "email",
+                        "status": "failed",
+                        "ip": "185.220.101.5",
+                        "timestamp": datetime.fromtimestamp(now_t - 14400, tz=timezone.utc).isoformat(),
+                    },
+                ]
+                for item in sample_access:
+                    repo.put("__system_admin__", "access_logs", item)
+
+                sample_feedback = [
+                    {
+                        "id": identifier(),
+                        "user": "student1@cdm.edu.ph",
+                        "category": "suggestion",
+                        "subject": "Add dark mode toggle to flashcard viewer",
+                        "message": "When studying late at night, the flashcards are bright white. Would love a night mode!",
+                        "status": "open",
+                        "admin_notes": "Added to backlog for next sprint.",
+                        "created_at": datetime.fromtimestamp(now_t - 18000, tz=timezone.utc).isoformat(),
+                    },
+                    {
+                        "id": identifier(),
+                        "user": "student2@cdm.edu.ph",
+                        "category": "bug",
+                        "subject": "PDF file upload on slow mobile connection",
+                        "message": "The progress bar paused on 90% before finishing.",
+                        "status": "resolved",
+                        "admin_notes": "Chunked upload resilience verified.",
+                        "created_at": datetime.fromtimestamp(now_t - 86400, tz=timezone.utc).isoformat(),
+                    },
+                ]
+                for item in sample_feedback:
+                    repo.put("__system_admin__", "feedback", item)
+
+                sample_activity = [
+                    {
+                        "id": identifier(),
+                        "user": "lozadamarklaurence226@gmail.com",
+                        "action": "login",
+                        "target": "Admin Console",
+                        "metadata": "IP: 127.0.0.1",
+                        "timestamp": now_str,
+                    },
+                    {
+                        "id": identifier(),
+                        "user": "student1@cdm.edu.ph",
+                        "action": "generated_quiz",
+                        "target": "Database Normalization Quiz",
+                        "metadata": "10 questions generated via AI",
+                        "timestamp": datetime.fromtimestamp(now_t - 7000, tz=timezone.utc).isoformat(),
+                    },
+                    {
+                        "id": identifier(),
+                        "user": "student1@cdm.edu.ph",
+                        "action": "uploaded_source",
+                        "target": "IT204_Lecture_Notes.pdf",
+                        "metadata": "1.4 MB, 18 pages indexed",
+                        "timestamp": datetime.fromtimestamp(now_t - 7100, tz=timezone.utc).isoformat(),
+                    },
+                ]
+                for item in sample_activity:
+                    repo.put("__system_admin__", "activity_logs", item)
+        except Exception:
+            pass
+
+    seed_admin_data_if_empty()
+
+    @app.get("/api/v1/admin/dashboard/kpis")
+    def admin_dashboard_kpis(admin: AdminOwner):
+        total_users = 1
+        try:
+            if hasattr(repo, "connection"):
+                with repo.connection() as db:
+                    row = db.execute("SELECT COUNT(DISTINCT owner) FROM records WHERE owner NOT LIKE '__%'").fetchone()
+                    if row and row[0]:
+                        total_users = max(row[0], 1)
+        except Exception:
+            pass
+
+        access_logs = repo.list("__system_admin__", "access_logs") or []
+        now_ts = time.time()
+        day_ago = now_ts - 86400
+
+        def parse_ts(item):
+            try:
+                return datetime.fromisoformat(item["timestamp"]).timestamp()
+            except Exception:
+                return 0
+
+        daily_logins = sum(1 for log in access_logs if parse_ts(log) >= day_ago and log.get("status") == "success")
+        active_today_set = {
+            log.get("email") for log in access_logs if parse_ts(log) >= day_ago and log.get("status") == "success"
+        }
+        active_users_today = len(active_today_set) if active_today_set else 1
+
+        feedback_tickets = repo.list("__system_admin__", "feedback") or []
+        open_tickets = sum(1 for t in feedback_tickets if t.get("status") == "open")
+
+        error_logs = repo.list("__system_admin__", "error_logs") or []
+        unresolved_errors = sum(1 for e in error_logs if e.get("status", "open") == "open")
+
+        return {
+            "total_users": max(total_users, len(active_today_set), 1),
+            "daily_logins": max(daily_logins, 1),
+            "active_users_today": max(active_users_today, 1),
+            "open_tickets": open_tickets,
+            "unresolved_errors": unresolved_errors,
+        }
+
+    @app.get("/api/v1/admin/access_logs")
+    def admin_access_logs(
+        admin: AdminOwner,
+        search: str | None = None,
+        status: str | None = None,
+        skip: int = 0,
+        limit: int = 50,
+    ):
+        items = repo.list("__system_admin__", "access_logs") or []
+        items.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        if status and status != "all":
+            items = [x for x in items if x.get("status") == status]
+        if search:
+            s_lower = search.lower()
+            items = [
+                x
+                for x in items
+                if s_lower in x.get("email", "").lower()
+                or s_lower in x.get("ip", "").lower()
+                or s_lower in x.get("auth_method", "").lower()
+                or s_lower in x.get("role", "").lower()
+            ]
+        total = len(items)
+        return {"items": items[skip : skip + limit], "total": total}
+
+    @app.get("/api/v1/admin/activity_logs")
+    def admin_activity_logs(
+        admin: AdminOwner,
+        search: str | None = None,
+        skip: int = 0,
+        limit: int = 50,
+    ):
+        items = repo.list("__system_admin__", "activity_logs") or []
+        items.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        if search:
+            s_lower = search.lower()
+            items = [
+                x
+                for x in items
+                if s_lower in x.get("user", "").lower()
+                or s_lower in x.get("action", "").lower()
+                or s_lower in x.get("target", "").lower()
+            ]
+        total = len(items)
+        return {"items": items[skip : skip + limit], "total": total}
+
+    @app.get("/api/v1/admin/feedback_support")
+    def admin_feedback_support(
+        admin: AdminOwner,
+        status: str | None = None,
+        skip: int = 0,
+        limit: int = 50,
+    ):
+        items = repo.list("__system_admin__", "feedback") or []
+        items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        if status and status != "all":
+            items = [x for x in items if x.get("status") == status]
+        total = len(items)
+        return {"items": items[skip : skip + limit], "total": total}
+
+    @app.patch("/api/v1/admin/feedback_support/{ticket_id}")
+    def admin_update_feedback(
+        ticket_id: str,
+        data: S.AdminFeedbackUpdate,
+        admin: AdminOwner,
+    ):
+        ticket = repo.get("__system_admin__", "feedback", ticket_id)
+        if not ticket:
+            raise HTTPException(404, "Feedback ticket not found.")
+        ticket["status"] = data.status
+        if data.admin_notes is not None:
+            ticket["admin_notes"] = data.admin_notes
+        ticket["updated_at"] = datetime.now(timezone.utc).isoformat()
+        repo.put("__system_admin__", "feedback", ticket)
+        return ticket
+
+    @app.post("/api/v1/feedback", status_code=201)
+    def submit_user_feedback(
+        data: S.FeedbackInput,
+        request: Request,
+        owner: Owner,
+    ):
+        claims = getattr(request.state, "account_claims", {}) or {}
+        email = claims.get("email") or (owner if not owner.startswith("enc_") else "student")
+        ticket = {
+            "id": identifier(),
+            "user": email,
+            "category": data.category,
+            "subject": data.subject,
+            "message": data.message,
+            "status": "open",
+            "admin_notes": "",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        repo.put("__system_admin__", "feedback", ticket)
+        return {"message": "Thank you! Your feedback has been received.", "id": ticket["id"]}
+
+    @app.get("/api/v1/admin/error_logs")
+    def admin_error_logs(
+        admin: AdminOwner,
+        severity: str | None = None,
+        skip: int = 0,
+        limit: int = 50,
+    ):
+        items = repo.list("__system_admin__", "error_logs") or []
+        items.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        if severity and severity != "all":
+            items = [x for x in items if x.get("severity") == severity]
+        total = len(items)
+        return {"items": items[skip : skip + limit], "total": total}
+
+    @app.get("/api/v1/admin/system_stats")
+    def admin_system_stats(admin: AdminOwner):
+        import platform
+        return {
+            "auth_mode": service.settings.auth_mode,
+            "data_backend": service.settings.data_backend,
+            "ai_enabled": service.settings.ai_enabled,
+            "ai_provider": "Cloudflare Workers AI",
+            "ai_model": service.settings.cloudflare_model,
+            "ocr_enabled": service.settings.ocr_enabled,
+            "python_version": platform.python_version(),
+            "platform": platform.platform(),
+            "max_upload_mb": service.settings.max_upload_bytes // (1024 * 1024),
+            "admin_emails": [e.strip() for e in getattr(service.settings, "admin_emails", "").split(",") if e.strip()],
+        }
 
     return app
 

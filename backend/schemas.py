@@ -456,3 +456,35 @@ class SearchBrief(Input):
     sections: list[BriefSection] = Field(min_length=1, max_length=6)
     key_terms: list[str] = Field(default_factory=list, max_length=12)
     further_reading: list[str] = Field(default_factory=list, max_length=8)
+
+
+class FeedbackInput(Input):
+    category: str = Field(default="general", max_length=50)
+    subject: str = Field(min_length=1, max_length=150)
+    message: str = Field(min_length=1, max_length=3000)
+    priority: str = Field(default="medium", max_length=20)
+    page_url: str | None = Field(default=None, max_length=500)
+
+
+class AdminFeedbackUpdate(Input):
+    status: str = Field(min_length=1, max_length=50)
+    admin_notes: str | None = Field(default=None, max_length=2000)
+
+
+class UserActivityInput(Input):
+    action: str = Field(min_length=1, max_length=100)
+    target: str = Field(min_length=1, max_length=200)
+    metadata: str | None = Field(default=None, max_length=1000)
+
+
+class ClientErrorInput(Input):
+    error_type: str = Field(min_length=1, max_length=100)
+    message: str = Field(min_length=1, max_length=2000)
+    stack_trace: str | None = Field(default=None, max_length=10000)
+    affected_page: str | None = Field(default=None, max_length=500)
+    severity: str = Field(default="error", max_length=20)
+
+
+class AdminErrorUpdate(Input):
+    status: str = Field(min_length=1, max_length=50)
+

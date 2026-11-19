@@ -18,6 +18,8 @@ export type AccountProfile = {
   study_goal: string;
   avatar: string;
   color: string;
+  role?: string;
+  is_admin?: boolean;
 };
 export const avatarSymbols: Record<string, string> = {
   book: "📚",
