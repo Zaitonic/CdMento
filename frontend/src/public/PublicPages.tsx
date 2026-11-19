@@ -884,11 +884,18 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
   const [fields, setFields] = useState<Record<string, string>>({});
   const [sent, setSent] = useState(false);
   const [demoAvailable, setDemoAvailable] = useState(false);
-  const [authMode, setAuthMode] = useState("checking");
+  const googleConfigured = !!import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  // Hosted Google builds know their auth mode from the OAuth client ID, so the
+  // sign-in form can appear immediately instead of waiting on a cold API.
+  const [authMode, setAuthMode] = useState(() =>
+    googleConfigured && import.meta.env.PROD ? "google" : "checking",
+  );
   const [healthAttempt, retryHealth] = useState(0);
   useEffect(() => {
     let active = true;
-    api("/health")
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 8000);
+    api("/health", { signal: controller.signal })
       .then((health) => {
         if (active) {
           setAuthMode(health.auth_mode);
@@ -898,13 +905,19 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
         }
       })
       .catch(() => {
-        if (active) {
+        if (!active) return;
+        // Keep Google sign-in visible when the health probe is slow. A real
+        // sign-in attempt will still report a server failure.
+        if (!(googleConfigured && import.meta.env.PROD)) {
           setAuthMode("unavailable");
           setDemoAvailable(false);
         }
-      });
+      })
+      .finally(() => window.clearTimeout(timer));
     return () => {
       active = false;
+      controller.abort();
+      window.clearTimeout(timer);
     };
   }, [mode, healthAttempt]);
   const googleMode = authMode === "google";

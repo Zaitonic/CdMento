@@ -142,6 +142,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const demoVersion = useRef(0);
   const [, render] = useState(0);
   const identity = user?.uid || demo?.uid;
+  // Never leave the app stuck on "Opening CdMento…" if a provider stalls.
+  useEffect(() => {
+    if (!loading) return;
+    const timer = window.setTimeout(() => setLoading(false), 10000);
+    return () => window.clearTimeout(timer);
+  }, [loading]);
   useEffect(() => {
     let active = true;
     setAccount(null);

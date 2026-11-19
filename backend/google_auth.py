@@ -12,6 +12,19 @@ from fastapi import HTTPException
 AUTH_OWNER = "__google_auth__"
 
 
+def _bounded_request():
+    """A google-auth request whose certificate fetch cannot hang sign-in."""
+    from google.auth.transport.requests import Request
+
+    class BoundedRequest(Request):
+        def __call__(self, url, method="GET", body=None, headers=None, timeout=10):
+            return super().__call__(
+                url, method=method, body=body, headers=headers, timeout=timeout
+            )
+
+    return BoundedRequest()
+
+
 class GoogleAuth:
     def __init__(self, repo, client_id):
         self.repo = repo
@@ -32,11 +45,10 @@ class GoogleAuth:
     def _verify(self, credential, client):
         self._throttle(client)
         try:
-            from google.auth.transport.requests import Request
             from google.oauth2 import id_token
 
             claims = id_token.verify_oauth2_token(
-                credential, Request(), audience=self.client_id
+                credential, _bounded_request(), audience=self.client_id
             )
         except Exception:
             raise HTTPException(401, "Google sign-in could not be verified. Please try again.") from None

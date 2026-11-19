@@ -29,8 +29,10 @@ function ProtectedWorkspace() {
   useEffect(() => {
     if (!accountUser?.emailVerified) return;
     let active = true;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 10000);
     setConnection("checking");
-    api("/health")
+    api("/health", { signal: controller.signal })
       .then((health) => {
         if (active)
           setConnection(
@@ -47,9 +49,12 @@ function ProtectedWorkspace() {
           setConnection(
             "We couldn’t connect to your workspace. Please try again.",
           );
-      });
+      })
+      .finally(() => window.clearTimeout(timer));
     return () => {
       active = false;
+      controller.abort();
+      window.clearTimeout(timer);
     };
   }, [accountUser?.uid, accountUser?.emailVerified, attempt, !!demo, provider]);
   if (loading)

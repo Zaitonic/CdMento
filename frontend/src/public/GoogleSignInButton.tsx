@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type GoogleCredential = { credential?: string };
 type GoogleIdentity = {
@@ -53,6 +53,7 @@ export function GoogleSignInButton({
   onError: (message: string) => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const onCredentialRef = useRef(onCredential);
   const onErrorRef = useRef(onError);
   onCredentialRef.current = onCredential;
@@ -61,6 +62,9 @@ export function GoogleSignInButton({
   useEffect(() => {
     let active = true;
     if (!clientId || !container.current) return;
+    const timer = window.setTimeout(() => {
+      if (active) setStatus("error");
+    }, 12000);
     loadGoogleIdentity()
       .then(() => {
         if (!active || !container.current || !window.google) return;
@@ -78,20 +82,37 @@ export function GoogleSignInButton({
           text: "continue_with",
           width: Math.min(400, Math.max(280, container.current.clientWidth)),
         });
+        window.clearTimeout(timer);
+        setStatus("ready");
       })
       .catch((error: unknown) => {
-        if (active)
+        if (active) {
+          window.clearTimeout(timer);
+          setStatus("error");
           onErrorRef.current(
             error instanceof Error ? error.message : "Google sign-in could not load.",
           );
+        }
       });
     return () => {
       active = false;
+      window.clearTimeout(timer);
       if (container.current) container.current.replaceChildren();
     };
   }, []);
 
   if (!clientId)
     return <p className="auth-notice" role="status">Google sign-in needs its OAuth Client ID.</p>;
-  return <div ref={container} className="auth-google-id-button" />;
+  return (
+    <>
+      {status !== "ready" && (
+        <p className="auth-notice" role="status">
+          {status === "loading"
+            ? "Loading Google sign-in…"
+            : "Google sign-in is taking longer than usual. Refresh the page or continue with email."}
+        </p>
+      )}
+      <div ref={container} className="auth-google-id-button" />
+    </>
+  );
 }
