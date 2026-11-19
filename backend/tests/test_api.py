@@ -252,6 +252,42 @@ def test_docx_tables_and_encoding():
     assert extract("Hello world".encode("utf-16"), "txt")[0] == "Hello world"
 
 
+def test_resumable_word_upload_completes_and_extracts(env):
+    client, services, _ = env
+    notebook = client.post("/api/v1/notebooks", json={"name": "Word"}).json()
+    document = Document()
+    document.add_paragraph("Cell membranes control what enters a cell.")
+    buffer = io.BytesIO()
+    document.save(buffer)
+    data = buffer.getvalue()
+    base = (
+        f"/api/v1/notebooks/{notebook['id']}/sources/upload-sessions"
+    )
+
+    session = client.post(base, json={"name": "biology.docx", "size": len(data)})
+    assert session.status_code == 201
+    upload_id = session.json()["id"]
+
+    part = client.put(
+        f"{base}/{upload_id}/parts/0",
+        files={"file": ("part", data, "application/octet-stream")},
+    )
+    assert part.status_code == 200
+    assert part.json()["parts"] == [0]
+
+    complete = client.post(f"{base}/{upload_id}/complete")
+    assert complete.status_code == 202
+    result = complete.json()
+    services.run_job("alice", result["job_id"])
+
+    source = client.get(f"/api/v1/sources/{result['source']['id']}/preview").json()
+    assert source["status"] == "ready"
+    assert "Cell membranes" in source["text"]
+    stored = services.repo.get("alice", "sources", result["source"]["id"])
+    assert services.storage.get(stored["storage_key"]) == data
+
+
+
 def test_chat_uses_owned_sources_and_persists(env):
     client, services, _ = env
     n, sid = seed(client, services)

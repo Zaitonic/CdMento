@@ -22,6 +22,7 @@
       "entrypoint": "backend.main:app",
       "functions": {
         "**/*.py": {
+          "maxDuration": 300,
           "excludeFiles": "{node_modules/**,frontend/**,public/**,build/**,dist/**,.git/**,.cache/**,.ruff_cache/**,.pytest_cache/**,backend/tests/**,backend/data/**,artifacts/**,docs/**,examples/**,scripts/**,.venv/**,.env,.env.*,**/__pycache__/**,.vercel_python_packages/**}"
         }
       }

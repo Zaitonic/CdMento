@@ -5,6 +5,7 @@ truststore.inject_into_ssl()
 import copy
 import hashlib
 import json
+import logging
 import os
 import threading
 import time
@@ -14,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
 from fastapi import FastAPI, Depends, HTTPException, Request, UploadFile, File
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -208,6 +210,9 @@ def create_app(config=None, services=None):
 
     @app.exception_handler(Exception)
     async def unexpected_error(request, error):
+        logging.getLogger("cdmento").exception(
+            "Unhandled error for %s %s", request.method, request.url.path
+        )
         return JSONResponse(
             {
                 "error": "The server could not complete this request. Your saved data has not been reset."
@@ -955,7 +960,10 @@ def create_app(config=None, services=None):
         if len(content) != expected_size:
             raise HTTPException(400, "This upload part has an invalid size.")
         key = f"tmp/{owner}/source-uploads/{upload_id}/{part_index}"
-        service.storage.put(key, content, "application/octet-stream")
+        # Blob/Storage clients are blocking; keep them off the event loop.
+        await run_in_threadpool(
+            service.storage.put, key, content, "application/octet-stream"
+        )
         parts = sorted(set(session.get("parts", []) + [part_index]))
         return repo.put(owner, "upload_sessions", {**session, "parts": parts})
 

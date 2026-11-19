@@ -1,4 +1,35 @@
+import asyncio
+import inspect
 from pathlib import Path
+
+
+def _blob_api():
+    """Return the blocking Vercel Blob functions.
+
+    vercel-blob 0.5 moved the async calls to the package root and kept the
+    blocking calls under ``vercel.blob.sync``. Older releases only exposed the
+    blocking functions at the root. Accept both so uploads keep working across
+    the supported version range.
+    """
+    try:
+        from vercel.blob import sync
+
+        if all(
+            hasattr(sync, name) for name in ("put_blob", "get_blob", "delete_blob")
+        ):
+            return sync
+    except ImportError:
+        pass
+    from vercel import blob
+
+    return blob
+
+
+def _blob_call(name, *args, **kwargs):
+    result = getattr(_blob_api(), name)(*args, **kwargs)
+    if inspect.isawaitable(result):
+        return asyncio.run(result)
+    return result
 
 
 class FileStorage:
@@ -19,9 +50,8 @@ class FileStorage:
         if self.bucket:
             self.bucket.blob(key).upload_from_string(data, content_type=content_type)
         elif self.use_vercel_blob:
-            from vercel.blob import put_blob
-
-            put_blob(
+            _blob_call(
+                "put_blob",
                 key,
                 data,
                 access="private",
@@ -37,9 +67,7 @@ class FileStorage:
         if self.bucket:
             return self.bucket.blob(key).download_as_bytes()
         if self.use_vercel_blob:
-            from vercel.blob import get_blob
-
-            return get_blob(key, access="private").body
+            return _blob_call("get_blob", key, access="private").body
         return self.local_path(key).read_bytes()
 
     def delete(self, key):
@@ -48,8 +76,6 @@ class FileStorage:
             if blob.exists():
                 blob.delete()
         elif self.use_vercel_blob:
-            from vercel.blob import delete_blob
-
-            delete_blob(key)
+            _blob_call("delete_blob", key)
         else:
             self.local_path(key).unlink(missing_ok=True)

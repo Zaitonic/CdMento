@@ -221,7 +221,7 @@ export default function SourcesPage({
             <b>
               {uploading ? "Processing material…" : "Drop your study material"}
             </b>
-            <small>PDF, DOCX, TXT · up to 10 MB</small>
+            <small>PDF, Word (.docx), TXT · up to 10 MB</small>
             <button
               className="primary"
               disabled={uploading}
@@ -253,13 +253,19 @@ export default function SourcesPage({
             />
           </label>
           <div className="source-filters">
-            {["all", "pdf", "txt"].map((f) => (
+            {["all", "pdf", "docx", "txt"].map((f) => (
               <button
                 key={f}
                 className={filter === f ? "active" : ""}
                 onClick={() => setFilter(f)}
               >
-                {f === "all" ? "All" : f === "txt" ? "Text" : "PDF"}
+                {f === "all"
+                  ? "All"
+                  : f === "txt"
+                    ? "Text"
+                    : f === "docx"
+                      ? "Word"
+                      : "PDF"}
               </button>
             ))}
           </div>
@@ -442,7 +448,7 @@ export default function SourcesPage({
                             await useStore.getState().refresh();
                             await waitForJob(result.job_id);
                             await useStore.getState().refresh();
-                            toast.success("PDF text updated.");
+                            toast.success("Document text updated.");
                           } catch (e: any) {
                             toast.error(e.message);
                           } finally {
@@ -524,7 +530,7 @@ export default function SourcesPage({
                             <h3>{label}</h3>
                             <p>
                               {text ||
-                                "No readable text on this page. Check the original PDF."}
+                                "No readable text in this section. Check the original document."}
                             </p>
                           </section>
                         ))
@@ -554,8 +560,8 @@ export default function SourcesPage({
               <span className="eyebrow">YOUR MATERIAL, IN FOCUS</span>
               <h2>A place for every page.</h2>
               <p>
-                Upload a PDF to read it here, or paste your study notes to get
-                started.
+                Upload a PDF, Word document (.docx), or text file to read it
+                here, or paste your study notes to get started.
               </p>
               <button className="secondary" onClick={chooseFiles}>
                 Add your first source
