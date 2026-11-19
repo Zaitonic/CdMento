@@ -113,14 +113,22 @@ export default function SourcesPage({
     input.current?.click();
   };
   async function upload(files: File[]) {
-    if (!s.active) {
+    if (uploading || !files.length) return;
+    // Recover if the remembered notebook was deleted on another device.
+    let notebook = s.active;
+    if (
+      !notebook ||
+      !useStore.getState().notebooks.some((item) => item.id === notebook)
+    ) {
+      await useStore.getState().refresh().catch(() => {});
+      notebook = useStore.getState().active;
+    }
+    if (!notebook) {
       toast.info("Create a notebook to organize your source.");
       onCreateNotebook?.();
       return false;
     }
-    if (uploading || !files.length) return;
     setUploading(true);
-    const notebook = s.active;
     try {
       await useStore.getState().flush();
       for (const file of files) {

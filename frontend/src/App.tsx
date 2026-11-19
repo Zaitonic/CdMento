@@ -287,11 +287,21 @@ export default function App() {
   };
   async function upload(files: FileList | null) {
     if (!files) return;
-    if (!s.active) {
-      chooseFiles();
+    // Recover if the remembered notebook was deleted on another device.
+    let active = useStore.getState().active;
+    if (
+      !active ||
+      !useStore.getState().notebooks.some((notebook) => notebook.id === active)
+    ) {
+      await useStore.getState().refresh().catch(() => {});
+      active = useStore.getState().active;
+    }
+    if (!active) {
+      openModal("notebook");
+      toast.info("Create a notebook first to organize your files.");
       return;
     }
-    const nid = s.active;
+    const nid = active;
     for (const file of Array.from(files)) {
       const loading = toast.loading(`Uploading ${file.name}…`);
       try {

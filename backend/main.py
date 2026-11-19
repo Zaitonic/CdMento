@@ -886,7 +886,8 @@ def create_app(config=None, services=None):
             return {"source": public_source(existing), "duplicate": True}
         sid = identifier()
         key = f"users/{owner}/sources/{sid}/original.{extension}"
-        service.storage.put(
+        await run_in_threadpool(
+            service.storage.put,
             key,
             bytes(content),
             {
