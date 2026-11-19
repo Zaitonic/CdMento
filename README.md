@@ -2,6 +2,8 @@
 
 > A modern, AI-powered study workspace designed for students, researchers, and lifelong learners to organize materials, master difficult concepts, and study smarter.
 
+**Live app:** [cdmento-study-7.vercel.app](https://cdmento-study-7.vercel.app)
+
 ---
 
 ## 💡 What is CdMento?
@@ -28,6 +30,13 @@ Instead of juggling separate apps for notes, flashcards, PDF reading, and timers
 - Ask questions grounded directly in your uploaded textbooks and lecture slides.
 - Every answer includes verifiable source citations and page numbers.
 - Automated creation of study guides, summaries, and key concept breakdowns.
+
+### 🔎 MentoSearch — Answer-First Topic Search
+- Search a topic and get a plain-English overview with sections, key terms, and numbered citations.
+- Evidence is retrieved from **Crossref, OpenAlex, Europe PMC, PubMed, arXiv, and Semantic Scholar**, then deduplicated and ranked.
+- Points without a supporting paper are labeled **General knowledge**, so the overview never implies a source it does not have.
+- Each evidence card links to the paper and to a **Google Scholar** verification search; the **Papers** tab keeps the full result list.
+- Topic briefs are cached for 24 hours and limited to 10 per account per hour, with a fully cited digest when AI is unavailable.
 
 ### 🗂️ Spaced Repetition Flashcards (FSRS)
 - Practice flashcards powered by the state-of-the-art **FSRS (Free Spaced Repetition Scheduler)** algorithm.
@@ -59,11 +68,11 @@ Instead of juggling separate apps for notes, flashcards, PDF reading, and timers
 | Layer | Technologies |
 | --- | --- |
 | **Frontend** | React 19 · TypeScript · Vite 8 · Tailwind CSS 4 · Zustand · React Router 7 · TipTap (ProseMirror) · @xyflow/react (React Flow) · PDF.js (`pdfjs-dist`) · Motion · Lucide React |
-| **Backend** | Python 3.13 · FastAPI (async REST) · Pydantic v2 · SQLite · Firestore (hosted) · RapidOCR (ONNX Runtime, OpenCV, PyPDFium2) · PyFSRS · Celery + Redis |
-| **AI & Search** | Cloudflare Workers AI (`llama-3.3-70b-instruct`) · Groq (`gpt-oss-120b`) · OpenRouter free tier · multi-provider failover gateway with JSON-schema enforcement |
+| **Backend** | Python 3.13 · FastAPI (async REST) · Pydantic v2 · SQLite · Firestore (hosted) · RapidOCR (ONNX Runtime, PyPDFium2) · PyFSRS · in-process background jobs · Brevo transactional email |
+| **AI & Search** | Cloudflare Workers AI (`llama-3.3-70b-instruct`) · Groq (`gpt-oss-120b`) · OpenRouter free tier · Mistral (optional) · multi-provider failover gateway with JSON-schema enforcement |
 | **Scholarly Sources** | Crossref · OpenAlex · Europe PMC · PubMed · arXiv · Semantic Scholar (optional API key) · Google Scholar link-out |
 | **PWA & Accessibility** | Web App Manifest · Service Worker precaching · WCAG AA contrast · 44px touch targets |
-| **Testing & Tooling** | Vitest + Testing Library · pytest · Prettier · TypeScript (`tsc --noEmit`) · GitHub · Vercel (optional hosting) |
+| **Testing & Tooling** | Vitest + Testing Library · pytest · Prettier · TypeScript (`tsc --noEmit`) · GitHub · Vercel |
 
 ---
 
@@ -94,7 +103,7 @@ The template configures the shared CdMento Google OAuth client for local sign-in
 
 ## Project Description
 
-CdMento is a Progressive Web App for students, researchers, and independent learners who need one place to turn study materials into useful learning activities. A user creates a notebook, adds PDF, DOCX, TXT, or pasted material, then reads it alongside extracted text. The workspace supports notes, source-grounded AI conversations, flashcards, quizzes, mind maps, focus sessions, tasks, and scholarly searches.
+CdMento is a Progressive Web App for students, researchers, and independent learners who need one place to turn study materials into useful learning activities. A user creates a notebook, adds PDF, DOCX, TXT, or pasted material, then reads it alongside extracted text. The workspace supports notes, source-grounded AI conversations, flashcards, quizzes, mind maps, focus sessions, tasks, and answer-first scholarly topic briefs with Google Scholar verification links.
 
 The system addresses three common study problems: materials scattered across apps, difficulty converting reading into active recall, and answers that are not traceable to source material. CdMento keeps material in an account-scoped notebook, produces review activities from selected sources, and returns citations where source material is used.
 
@@ -126,7 +135,7 @@ The system addresses three common study problems: materials scattered across app
 | FR-13 | The system shall let users take quizzes, save attempts, submit answers, and receive marking or feedback. |
 | FR-14 | The system shall let users create and edit a notebook mind map. |
 | FR-15 | The system shall let users start and end focus sessions and manage a personal task list. |
-| FR-16 | The system shall search supported scholarly sources through a server-side, allow-listed search endpoint. |
+| FR-16 | The system shall search supported scholarly sources and return an answer-first topic brief, label general-knowledge points, and link each source to Google Scholar for verification. |
 | FR-17 | The system shall allow a user to export and import their workspace data. |
 | FR-18 | The system shall expose a health status endpoint for deployment monitoring without returning secret values. |
 
@@ -276,11 +285,10 @@ flowchart LR
     ai --> optionalAI[Optional configured providers]
 
     api --> search[Allow-listed scholarly search proxy]
-    search --> semantic[Semantic Scholar]
-    search --> arxiv[arXiv]
+    search --> indexes[Crossref · OpenAlex · Europe PMC · PubMed · arXiv · Semantic Scholar]
 ```
 
-The PWA sends authenticated requests to FastAPI. FastAPI verifies identity, applies account ownership checks, reads or writes records in Firestore, and stores source bytes privately. Document processing converts sources into extracted text before an AI request is made. The AI gateway uses configured providers and returns an unavailable state when no permitted provider can serve a request. Scholarly searches are proxied by FastAPI so browser CORS restrictions and API keys remain outside the client.
+The PWA sends authenticated requests to FastAPI. FastAPI verifies identity, applies account ownership checks, reads or writes records in Firestore, and stores source bytes privately. Document processing converts sources into extracted text before an AI request is made. The AI gateway uses configured providers and returns an unavailable state when no permitted provider can serve a request. Scholarly searches are proxied by FastAPI so browser CORS restrictions and API keys remain outside the client. `POST /api/v1/search/brief` retrieves evidence, ranks it, and asks the gateway for a cited topic overview; if no provider is available, it returns a fully cited extractive digest instead.
 
 ---
 
@@ -356,6 +364,7 @@ flowchart TD
 | `focus_sessions` | session UUID | `notebook`, `duration`, `mode`, `status`, `remaining`, `deadline`, timestamps | Stores Pomodoro-style focus sessions. |
 | `tasks` | task UUID | `text`, `done`, `created_at`, `revision` | Stores personal tasks. |
 | `jobs` and `upload_sessions` | UUID | status, progress, source or request references, timestamps | Tracks document processing, AI work, and resumable uploads. |
+| `search_cache` | request hash | `query`, `expires_at`, `body` | Caches topic briefs for 24 hours per account, query, source set, and sort. |
 
 For records larger than Firestore's practical document limit, the repository stores a reference to private bucket content or uses a `record_payloads/{chunkId}/parts/{partId}` collection. Original uploaded file bytes are not embedded in Firestore documents.
 
@@ -388,7 +397,7 @@ The authenticated user ID is passed to every repository operation. API helpers c
 
 The interface is built around a learner's normal study sequence: enter a workspace, choose a notebook, add material, read or create learning activities, then return to the same notebook later. The public landing pages introduce the product and authentication routes; protected workspace pages use a consistent left navigation, notebook context, content area, and status feedback.
 
-The implemented React pages act as functional prototypes. The source reader uses an original-file and extracted-text view; notes use a focused editor; flashcards and quizzes use dedicated practice layouts; mind maps use an interactive graph; and the focus timer uses a task-oriented view. This keeps each learning activity visually appropriate while preserving the same account and notebook context.
+The implemented React pages act as functional prototypes. The source reader uses an original-file and extracted-text view; notes use a focused editor; flashcards and quizzes use dedicated practice layouts; mind maps use an interactive graph; and the focus timer uses a task-oriented view. MentoSearch opens on an **Answer** tab with numbered citations, evidence cards, and per-source Google Scholar verification links; its **Papers** tab keeps the full ranked list. This keeps each learning activity visually appropriate while preserving the same account and notebook context.
 
 The layout adapts from desktop panels to a mobile navigation drawer at smaller widths. The public pages and workspace include responsive CSS breakpoints, touch-friendly controls, light and dark themes, visible focus treatment, and reduced-motion support through Motion's user preference setting.
 
