@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Shield,
   Users,
@@ -28,6 +28,7 @@ import {
 import { toast } from "sonner";
 import { api, json } from "../../lib/api";
 import { useSession } from "../../lib/Session";
+import { UsersPage } from "./UsersPage";
 import "./admin.css";
 
 type TabKind =
@@ -55,7 +56,6 @@ interface AccessLog {
   ip: string;
   timestamp: string;
 }
-
 interface ActivityLog {
   id: string;
   user: string;
@@ -103,6 +103,7 @@ interface SystemStats {
 
 export default function AdminPanel() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, account, logout } = useSession();
 
   const [activeTab, setActiveTab] = useState<TabKind>("dashboard");
@@ -155,8 +156,8 @@ export default function AdminPanel() {
     try {
       const res = await api<KPIs>("/admin/dashboard/kpis");
       setKpis(res);
-    } catch {
-      // If unauthorized, handled by guard
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load live user count");
     }
   };
 
@@ -251,6 +252,15 @@ export default function AdminPanel() {
 
   useEffect(() => {
     refreshAll();
+    const refreshTimer = window.setInterval(() => {
+      if (!document.hidden) refreshAll();
+    }, 10000);
+    const handleFocus = () => refreshAll();
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      window.clearInterval(refreshTimer);
+      window.removeEventListener("focus", handleFocus);
+    };
   }, []);
 
   useEffect(() => {
@@ -338,6 +348,8 @@ export default function AdminPanel() {
     );
   }
 
+  if (location.pathname === "/admin/users") return <UsersPage />;
+
   const tabTitles: Record<TabKind, string> = {
     dashboard: "Dashboard Overview",
     access: "Login & Access Monitoring",
@@ -375,6 +387,13 @@ export default function AdminPanel() {
           >
             <Shield size={18} />
             <span>Dashboard</span>
+          </button>
+          <button
+            className="admin-nav-item"
+            onClick={() => navigate("/admin/users")}
+          >
+            <Users size={18} />
+            <span>Users / Accounts</span>
           </button>
           <button
             className={`admin-nav-item ${activeTab === "access" ? "active" : ""}`}
@@ -1262,3 +1281,4 @@ export default function AdminPanel() {
     </div>
   );
 }
+

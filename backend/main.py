@@ -135,7 +135,13 @@ def check_admin(request: Request, owner: Owner):
     ]
     repo = request.app.state.services.repo
     profile = repo.get(owner, "profile", "account") or {}
-    if (email and email in admin_emails) or profile.get("role") == "admin" or owner == "demo-student":
+    if (
+        claims.get("admin") is True
+        or claims.get("role") == "admin"
+        or (email and email in admin_emails)
+        or profile.get("role") == "admin"
+        or owner == "demo-student"
+    ):
         return owner
     raise HTTPException(status_code=403, detail="Admin access required.")
 
@@ -570,12 +576,213 @@ def create_app(config=None, services=None):
         except Exception:
             pass
 
+    def upsert_user_profile(uid, email, display_name, provider, claims=None, preserve_display_name=False):
+        """Keep the admin-facing account profile in sync after authentication."""
+        claims = claims or {}
+        email = (email or "").strip().casefold()
+        previous = repo.get(uid, "profile", "account") or {}
+        admin_emails = {
+            value.strip().casefold()
+            for value in getattr(service.settings, "admin_emails", "").split(",")
+            if value.strip()
+        }
+        custom_claims = claims.get("admin") is True
+        role = previous.get("role", "student")
+        if email in admin_emails or custom_claims:
+            role = "admin"
+        return repo.put(
+            uid,
+            "profile",
+            {
+                **previous,
+                "id": "account",
+                "email": email,
+                "display_name": previous.get("display_name") if preserve_display_name and previous.get("display_name") else (display_name or previous.get("display_name") or email.split("@", 1)[0]),
+                "provider": provider,
+                "role": role,
+                "created_at": previous.get("created_at", now()),
+                "last_sign_in_at": now(),
+                "updated_at": now(),
+            },
+        )
+
+    def _iso_timestamp(value):
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.astimezone(timezone.utc).isoformat()
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat()
+
+    def _account_timestamp(value):
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+        return value
+
+    def _profile_records():
+        if isinstance(repo, FirestoreRepository):
+            records = {}
+            for snapshot in repo.db.collection("users").stream():
+                value = repo.decode(snapshot.to_dict()) or {}
+                if value:
+                    records[snapshot.id] = value
+            for snapshot in repo.db.collection_group("profile").stream():
+                owner_ref = snapshot.reference.parent.parent
+                if owner_ref is None:
+                    continue
+                records[owner_ref.id] = {
+                    **records.get(owner_ref.id, {}),
+                    **(repo.decode(snapshot.to_dict()) or {}),
+                }
+            return records
+        with repo.connection() as db:
+            rows = db.execute(
+                "SELECT owner, body FROM records WHERE kind='profile' AND owner NOT LIKE '__%'"
+            ).fetchall()
+        return {owner: json.loads(body) for owner, body in rows}
+
+    def _firebase_auth_users():
+        try:
+            from firebase_admin import auth
+
+            return list(auth.list_users().iterate_all())
+        except Exception as error:
+            logging.getLogger("cdmento").exception("Firebase Admin user listing failed")
+            raise HTTPException(
+                503,
+                f"Firebase Admin user listing failed: {type(error).__name__}: {error}",
+            ) from error
+
+    def merged_admin_users():
+        profiles = _profile_records()
+        merged = {}
+
+        if service.settings.auth_mode == "firebase" or service.settings.data_backend == "firestore":
+            for record in _firebase_auth_users():
+                providers = [item.provider_id for item in (record.provider_data or [])]
+                provider = providers[0] if providers else "firebase"
+                provider = {"google.com": "google", "password": "password"}.get(provider, provider)
+                merged[record.uid] = {
+                    "uid": record.uid,
+                    "email": record.email or "",
+                    "display_name": record.display_name or "",
+                    "provider": provider,
+                    "disabled": bool(record.disabled),
+                    "email_verified": bool(record.email_verified),
+                    "created_at": _iso_timestamp(record.user_metadata.creation_timestamp),
+                    "last_sign_in_at": _iso_timestamp(record.user_metadata.last_sign_in_timestamp),
+                    "role": "admin" if (record.custom_claims or {}).get("admin") else "student",
+                    "login_count": 0,
+                    "activity_count": 0,
+                }
+
+        if service.settings.data_backend == "sqlite":
+            for owner, kind in (("__google_auth__", "accounts"), ("__email_password_auth__", "accounts")):
+                for account in repo.list(owner, kind):
+                    uid = account.get("uid") or account.get("id")
+                    if uid:
+                        merged[uid] = {
+                            "uid": uid,
+                            "email": account.get("email", ""),
+                            "display_name": account.get("display_name", ""),
+                            "provider": "google" if owner == "__google_auth__" else "password",
+                            "disabled": bool(account.get("disabled", False)),
+                            "email_verified": bool(account.get("email_verified", False)),
+                            "created_at": _account_timestamp(account.get("created_at")),
+                            "last_sign_in_at": account.get("last_sign_in_at"),
+                            "role": account.get("role", "student"),
+                            "login_count": 0,
+                            "activity_count": 0,
+                        }
+
+        for uid, profile in profiles.items():
+            current = merged.get(uid, {"uid": uid, "disabled": False, "email_verified": False, "login_count": 0, "activity_count": 0})
+            merged[uid] = {
+                **current,
+                "email": profile.get("email", current.get("email", "")),
+                "display_name": profile.get("display_name", current.get("display_name", "")),
+                "provider": profile.get("provider", current.get("provider", "unknown")),
+                "role": "admin" if current.get("role") == "admin" else profile.get("role", current.get("role", "student")),
+                "disabled": profile.get("disabled", current.get("disabled", False)),
+                "created_at": profile.get("created_at", current.get("created_at")),
+                "last_sign_in_at": profile.get("last_sign_in_at", current.get("last_sign_in_at")),
+            }
+
+        logs = repo.list("__system_admin__", "access_logs")
+        activities = repo.list("__system_admin__", "activity_logs")
+        for item in merged.values():
+            email = item["email"].casefold()
+            item["login_count"] = sum(1 for log in logs if log.get("email", "").casefold() == email and log.get("status") == "success")
+            item["activity_count"] = sum(1 for log in activities if log.get("user", "").casefold() == email)
+        return sorted(merged.values(), key=lambda item: item.get("created_at") or "", reverse=True)
+
+    @app.get("/api/v1/admin/users")
+    def admin_users_list(
+        admin: AdminOwner,
+        skip: int = 0,
+        limit: int | None = None,
+        search: str | None = None,
+        role: str | None = None,
+        provider: str | None = None,
+    ):
+        items = merged_admin_users()
+        if search:
+            needle = search.casefold()
+            items = [item for item in items if needle in item["uid"].casefold() or needle in item["email"].casefold() or needle in item["display_name"].casefold()]
+        if role:
+            items = [item for item in items if item["role"] == role]
+        if provider:
+            items = [item for item in items if item["provider"] == provider]
+        return {"items": items[skip:] if limit is None else items[skip : skip + limit], "total": len(items)}
+
+    @app.patch("/api/v1/admin/users/{uid}/role")
+    def admin_user_role(uid: str, data: dict, admin: AdminOwner):
+        role = data.get("role")
+        if role not in ("admin", "student"):
+            raise HTTPException(400, "Role must be admin or student.")
+        profile = repo.get(uid, "profile", "account")
+        if not profile:
+            raise HTTPException(404, "User profile not found.")
+        repo.put(uid, "profile", {**profile, "role": role, "updated_at": now()})
+        return {"uid": uid, "role": role}
+
+    @app.patch("/api/v1/admin/users/{uid}/status")
+    def admin_user_status(uid: str, data: dict, admin: AdminOwner):
+        disabled = bool(data.get("disabled"))
+        if service.settings.auth_mode == "firebase" or service.settings.data_backend == "firestore":
+            try:
+                from firebase_admin import auth
+
+                auth.update_user(auth.get_user(uid).uid, disabled=disabled)
+            except Exception as error:
+                logging.getLogger("cdmento").exception("Firebase Admin status update failed for %s", uid)
+                raise HTTPException(503, f"Firebase Admin status update failed: {type(error).__name__}: {error}") from error
+        profile = repo.get(uid, "profile", "account") or {"id": "account"}
+        repo.put(uid, "profile", {**profile, "disabled": disabled, "updated_at": now()})
+        return {"uid": uid, "disabled": disabled}
+
+    @app.get("/api/v1/admin/users/{uid}/details")
+    def admin_user_details(uid: str, admin: AdminOwner):
+        user = next((item for item in merged_admin_users() if item["uid"] == uid), None)
+        if not user:
+            raise HTTPException(404, "User not found.")
+        email = user["email"].casefold()
+        logins = [item for item in repo.list("__system_admin__", "access_logs") if item.get("email", "").casefold() == email]
+        activity = [item for item in repo.list("__system_admin__", "activity_logs") if item.get("user", "").casefold() == email]
+        tickets = [item for item in repo.list("__system_admin__", "feedback") if item.get("user", "").casefold() == email]
+        return {**user, "logins": logins, "activity": activity, "tickets": tickets}
+
     @app.post("/api/v1/auth/demo/login")
     def demo_login(data: S.DemoLogin, request: Request):
         auth = local_demo(request)
         client = request.client.host if request.client else "127.0.0.1"
         try:
             res = auth.login(data.email, data.password, client)
+            upsert_user_profile(
+                res["profile"]["uid"],
+                res["profile"]["email"],
+                res["profile"].get("displayName"),
+                "local-demo",
+            )
             record_access_log(data.email, "local-demo", "success", client, "admin")
             return res
         except Exception:
@@ -597,7 +804,16 @@ def create_app(config=None, services=None):
     def google_register(data: S.GoogleLogin, request: Request):
         auth = google_auth(request)
         client = request.client.host if request.client else "unknown"
-        return auth.register(data.credential, data.remember, client)
+        result = auth.register(data.credential, data.remember, client)
+        profile = result.get("profile", {})
+        upsert_user_profile(
+            profile.get("uid"),
+            profile.get("email"),
+            profile.get("displayName"),
+            "google",
+        )
+        record_access_log(profile.get("email", "google-user"), "google", "success", client)
+        return result
 
     @app.post("/api/v1/auth/google/login")
     def google_login(data: S.GoogleLogin, request: Request):
@@ -606,6 +822,13 @@ def create_app(config=None, services=None):
         try:
             res = auth.login(data.credential, data.remember, client)
             email = res.get("profile", {}).get("email") or "google-user"
+            profile = res.get("profile", {})
+            upsert_user_profile(
+                profile.get("uid"),
+                email,
+                profile.get("displayName"),
+                "google",
+            )
             record_access_log(email, "google", "success", client)
             return res
         except Exception:
@@ -647,6 +870,13 @@ def create_app(config=None, services=None):
         try:
             res = email_auth(request).login(
                 data.email, data.password, client, data.remember
+            )
+            profile = res.get("profile", {})
+            upsert_user_profile(
+                profile.get("uid"),
+                profile.get("email") or data.email,
+                profile.get("displayName"),
+                "password",
             )
             record_access_log(data.email, "email", "success", client)
             return res
@@ -739,13 +969,30 @@ def create_app(config=None, services=None):
         existing = repo.get(owner, "profile", "account") or {}
         demo = app.state.demo_auth.profile() if owner == "demo-student" else {}
         email = claims.get("email") or demo.get("email") or existing.get("email", "")
+        if email:
+            provider = claims.get("firebase", {}).get("sign_in_provider", "firebase")
+            if owner.startswith("google_"):
+                provider = "google"
+            elif owner.startswith("email_"):
+                provider = "password"
+            upsert_user_profile(
+                owner,
+                email,
+                claims.get("name") or demo.get("displayName") or existing.get("display_name"),
+                provider,
+                claims,
+                preserve_display_name=True,
+            )
+            existing = repo.get(owner, "profile", "account") or existing
         admin_emails = [
             e.strip().casefold()
             for e in getattr(service.settings, "admin_emails", "").split(",")
             if e.strip()
         ]
         is_adm = (
-            (email.strip().casefold() in admin_emails)
+            claims.get("admin") is True
+            or claims.get("role") == "admin"
+            or (email.strip().casefold() in admin_emails)
             or (owner == "demo-student")
             or (existing.get("role") == "admin")
         )
@@ -2058,15 +2305,10 @@ def create_app(config=None, services=None):
 
     @app.get("/api/v1/admin/dashboard/kpis")
     def admin_dashboard_kpis(admin: AdminOwner):
-        total_users = 1
         try:
-            if hasattr(repo, "connection"):
-                with repo.connection() as db:
-                    row = db.execute("SELECT COUNT(DISTINCT owner) FROM records WHERE owner NOT LIKE '__%'").fetchone()
-                    if row and row[0]:
-                        total_users = max(row[0], 1)
-        except Exception:
-            pass
+            total_users = len(merged_admin_users())
+        except HTTPException:
+            raise
 
         access_logs = repo.list("__system_admin__", "access_logs") or []
         now_ts = time.time()
@@ -2091,7 +2333,7 @@ def create_app(config=None, services=None):
         unresolved_errors = sum(1 for e in error_logs if e.get("status", "open") == "open")
 
         return {
-            "total_users": max(total_users, len(active_today_set), 1),
+            "total_users": total_users,
             "daily_logins": max(daily_logins, 1),
             "active_users_today": max(active_users_today, 1),
             "open_tickets": open_tickets,
