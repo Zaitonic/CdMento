@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Annotated
 from fastapi import FastAPI, Depends, HTTPException, Request, UploadFile, File
 from fastapi.concurrency import run_in_threadpool
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -155,6 +156,21 @@ def create_app(config=None, services=None):
             TrustedHostMiddleware,
             allowed_hosts=["127.0.0.1", "localhost", "testserver", "[::1]"],
         )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "https://cdmento-study-7.vercel.app",
+            "https://cdmento-study-7.vercel.app",
+            "http://127.0.0.1:5173",
+            "http://localhost:5173",
+            "http://127.0.0.1:8000",
+            "http://localhost:8000",
+        ],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "X-CSRF-Token"],
+        max_age=3600,
+    )
 
     @app.middleware("http")
     async def request_guard(request, call_next):
@@ -428,8 +444,21 @@ def create_app(config=None, services=None):
                     question.pop(key, None)
         return value
 
+    def public_attempt(value):
+        """Strip quiz answer keys and explanations from stored attempts.
+
+        A stored attempt can embed the full question list with correct answers
+        and explanations. Returning it verbatim would leak the answer key
+        through the workspace export, so sanitize it the same way as artifacts.
+        """
+        value = copy.deepcopy(value)
+        for question in value.get("questions", []):
+            for key in ("correct", "explanation"):
+                question.pop(key, None)
+        return value
+
     @app.get("/api/v1/health")
-    def health(deep: int = 0):
+    def health(request: Request, deep: int = 0):
         result = {
             "status": "ok",
             "backend": "python",
@@ -442,6 +471,10 @@ def create_app(config=None, services=None):
         }
         if not deep:
             return result
+        # Deep checks perform a repository write and an outbound certificate
+        # fetch. Require an authenticated caller so the probe cannot be used
+        # anonymously for write amplification or outbound probing.
+        user(request)
         checks = {}
 
         def probe(name, action):
@@ -762,6 +795,10 @@ def create_app(config=None, services=None):
                     raise ValueError(
                         "Artifact kind must be quiz, flashcards, mindmap, or guide."
                     )
+                # Validate the full artifact shape (not just id/notebook/kind) so
+                # imported backups cannot inject unexpected fields or crash
+                # downstream readers. Unknown kinds raise ValueError.
+                S.validate_artifact(a)
             prepared_sources = []
             for source in sources:
                 if (
@@ -1152,6 +1189,8 @@ def create_app(config=None, services=None):
     def job(jid: str, owner: Owner):
         current = owned(owner, "jobs", jid)
         # Serverless instances have no persistent worker; polling resumes due work.
+        # run_job is idempotent: it holds a per-job lease and uses a CAS update,
+        # so repeated GETs from caches or retries never start duplicate work.
         if os.getenv("VERCEL") == "1" and current["status"] in ("queued", "waiting", "processing"):
             service.run_job(owner, jid)
         return {k: v for k, v in owned(owner, "jobs", jid).items() if k != "checkpoint"}

@@ -468,6 +468,65 @@ def test_import_idempotent_and_unrelated_work_preserved(env):
     assert any(n["id"] == original["id"] for n in result["notebooks"])
 
 
+def test_import_validates_artifact_shape(env):
+    client, _, _ = env
+    base = {
+        "notebooks": [{"id": "legacy", "name": "Imported", "color": "purple"}],
+        "notes": [],
+        "sources": [],
+    }
+    valid_quiz = {
+        **base,
+        "artifacts": [
+            {
+                "id": "quiz1",
+                "notebook": "legacy",
+                "kind": "quiz",
+                "title": "Imported quiz",
+                "questions": [
+                    {
+                        "id": "q1",
+                        "question": "Which device connects a LAN?",
+                        "options": [
+                            {"id": "0", "text": "A router"},
+                            {"id": "1", "text": "A switch"},
+                            {"id": "2", "text": "A modem"},
+                            {"id": "3", "text": "A firewall"},
+                        ],
+                        "correct": "0",
+                        "explanation": "A router connects networks.",
+                        "concept": "LAN",
+                        "source_ids": [],
+                    }
+                ],
+            }
+        ],
+    }
+    result = client.post("/api/v1/workspace/import", json=valid_quiz)
+    assert result.status_code == 200
+    # A malformed artifact (missing the answer key shape) must be rejected
+    # without partially importing the notebook.
+    bad_quiz = {
+        **base,
+        "artifacts": [
+            {
+                "id": "quiz2",
+                "notebook": "legacy",
+                "kind": "quiz",
+                "title": "Broken",
+                "questions": [
+                    {"id": "q1", "question": "No options or key here"}
+                ],
+            }
+        ],
+    }
+    assert client.post("/api/v1/workspace/import", json=bad_quiz).status_code == 422
+    assert all(
+        a["id"] != "quiz2"
+        for a in client.get("/api/v1/workspace").json()["artifacts"]
+    )
+
+
 def test_firebase_missing_invalid_and_valid_tokens(env, monkeypatch):
     client, services, app = env
     services.settings.auth_mode = "firebase"

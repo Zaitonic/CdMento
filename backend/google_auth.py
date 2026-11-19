@@ -63,11 +63,6 @@ class GoogleAuth:
     def email_id(email):
         return hashlib.sha256(email.strip().casefold().encode()).hexdigest()
 
-    def _password_account_exists(self, email):
-        return self.repo.get(
-            "__email_password_auth__", "accounts", self.email_id(email)
-        ) is not None
-
     def _session(self, account, remember):
         now = time.time()
         token = "google_" + secrets.token_urlsafe(32)
@@ -91,11 +86,6 @@ class GoogleAuth:
         account = self.repo.get(AUTH_OWNER, "accounts", uid)
         if account:
             return {"requires_signup": False, **self._session(account, remember)}
-        if self._password_account_exists(email):
-            raise HTTPException(
-                409,
-                "An account already uses this email. Sign in with email and password.",
-            )
         return {
             "requires_signup": True,
             "email": email,
@@ -108,11 +98,6 @@ class GoogleAuth:
         account = self.repo.get(AUTH_OWNER, "accounts", uid)
         if account:
             return {"requires_signup": False, **self._session(account, remember)}
-        if self._password_account_exists(email):
-            raise HTTPException(
-                409,
-                "An account already uses this email. Sign in with email and password.",
-            )
 
         now = time.time()
         account = {
@@ -131,11 +116,8 @@ class GoogleAuth:
         uid = "google_" + hashlib.sha256(subject.encode()).hexdigest()
         account = self.repo.get(AUTH_OWNER, "accounts", uid)
         if not account:
-            if self._password_account_exists(email):
-                raise HTTPException(
-                    409,
-                    "An account already uses this email. Sign in with email and password.",
-                )
+            # Do not reveal whether this email is tied to a password account;
+            # both paths return the same message and status.
             raise HTTPException(404, "No CdMento account uses this Google account yet.")
 
         account = self.repo.put(

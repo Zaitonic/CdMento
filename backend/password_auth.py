@@ -1,5 +1,6 @@
 """Email/password accounts with one-time email verification and reset links."""
 
+import base64
 import hashlib
 import hmac
 import html
@@ -9,15 +10,13 @@ import time
 from collections import defaultdict, deque
 from urllib.parse import quote
 
+import bcrypt
 from fastapi import HTTPException
 from .repository import Conflict
 
 
 AUTH_OWNER = "__email_password_auth__"
 GOOGLE_AUTH_OWNER = "__google_auth__"
-GOOGLE_ACCOUNT_MESSAGE = (
-    "This email uses Google sign-in. Continue with Google to open your existing account."
-)
 
 
 class PasswordAuth:
@@ -33,10 +32,44 @@ class PasswordAuth:
         return hashlib.sha256(email.strip().casefold().encode()).hexdigest()
 
     @staticmethod
-    def password_hash(password, salt):
+    def _scrypt_hash(password, salt):
         return hashlib.scrypt(
             password.encode(), salt=bytes.fromhex(salt), n=16384, r=8, p=1, dklen=32
         ).hex()
+
+    @staticmethod
+    def password_hash(password, salt):
+        """bcrypt hash. The salt is embedded in the bcrypt string; the stored
+        hex salt is kept only for legacy migration bookkeeping."""
+        return base64.b64encode(
+            bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+        ).decode()
+
+    def _verify_and_migrate(self, account, password):
+        """Verify a password, transparently migrating legacy scrypt hashes to bcrypt."""
+        stored = account.get("password_hash", "")
+        is_bcrypt = account.get("alg") == "bcrypt"
+        if not is_bcrypt:
+            candidate = self._scrypt_hash(password, account.get("salt", "00" * 16))
+            if not hmac.compare_digest(candidate, stored):
+                return False
+            # Migrate to bcrypt on successful legacy login.
+            self.repo.put(
+                AUTH_OWNER,
+                "accounts",
+                {
+                    **account,
+                    "password_hash": self.password_hash(password, account.get("salt")),
+                    "alg": "bcrypt",
+                },
+            )
+            return True
+        try:
+            return bcrypt.checkpw(
+                password.encode(), base64.b64decode(stored)
+            )
+        except (ValueError, TypeError):
+            return False
 
     def _throttle(self, key, limit, seconds, message):
         now = time.time()
@@ -98,8 +131,11 @@ class PasswordAuth:
             if not account["email_verified"]:
                 self._send_action(account, "verify")
             return {"message": "If this email can be registered, check your inbox for next steps."}
+        # Do not create a duplicate password account for an email already owned
+        # by Google sign-in. The check is silent: the caller sees the same
+        # generic message either way, so account enumeration is prevented.
         if self._google_account_exists(email):
-            raise HTTPException(409, GOOGLE_ACCOUNT_MESSAGE)
+            return {"message": "If this email can be registered, check your inbox for next steps."}
         salt = secrets.token_hex(16)
         account = {
             "id": account_id,
@@ -109,6 +145,7 @@ class PasswordAuth:
             "email_verified": False,
             "salt": salt,
             "password_hash": self.password_hash(password, salt),
+            "alg": "bcrypt",
         }
         self.repo.put(AUTH_OWNER, "accounts", account)
         self._send_action(account, "verify")
@@ -118,12 +155,13 @@ class PasswordAuth:
         self._throttle(("login", client), 10, 600, "Too many sign-in attempts. Please wait ten minutes.")
         email = email.strip().casefold()
         account = self.repo.get(AUTH_OWNER, "accounts", self.email_id(email))
-        salt = account["salt"] if account else "00" * 16
-        candidate = self.password_hash(password, salt)
-        if not account or not hmac.compare_digest(candidate, account["password_hash"]):
-            raise HTTPException(401, "The email or password is incorrect. Please try again.")
-        if not account["email_verified"]:
+        # Email verification takes precedence over password verification.
+        if account and not account["email_verified"]:
             raise HTTPException(403, "Verify your email using the link we sent before signing in.")
+        if not account:
+            raise HTTPException(401, "The email or password is incorrect. Please try again.")
+        if not self._verify_and_migrate(account, password):
+            raise HTTPException(401, "The email or password is incorrect. Please try again.")
         with self.lock:
             self.attempts[("login", client)].clear()
         token = "account_" + secrets.token_urlsafe(32)
@@ -178,8 +216,8 @@ class PasswordAuth:
             # also verifies the address. Otherwise a forgotten password on a
             # never-verified signup could never be recovered.
             self._send_action(account, "reset")
-        elif self._google_account_exists(email):
-            raise HTTPException(409, GOOGLE_ACCOUNT_MESSAGE)
+        # Do not confirm whether the email exists or belongs to a Google account.
+        # Always return the same message regardless of the account's state.
         return {"message": "If an account exists for this email, reset instructions will be sent."}
 
     def reset_password(self, token, password):
@@ -196,6 +234,7 @@ class PasswordAuth:
                 **account,
                 "salt": salt,
                 "password_hash": self.password_hash(password, salt),
+                    "alg": "bcrypt",
                 # Opening a link delivered to the mailbox proves ownership.
                 "email_verified": True,
             },

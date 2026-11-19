@@ -520,6 +520,23 @@ def _scholar_url(title):
     return "https://scholar.google.com/scholar?q=" + quote(title)
 
 
+def _bounded_response(response):
+    """Reject oversized responses and disallow redirects to unknown hosts.
+
+    Upstream hosts are fixed and never taken from the request, but a redirect
+    could escape to an attacker-controlled host or a huge payload could exhaust
+    memory. This guard is defense-in-depth: it runs after the response arrives.
+    """
+    if response.status_code >= 300 and response.status_code < 400:
+        location = response.headers.get("location", "")
+        host = (urlparse(location).hostname or "").lower()
+        if not host or host not in _ALLOWED_HOSTS:
+            raise ValueError("This source redirected to an unexpected host.")
+    if len(response.content) > MAX_RESPONSE_BYTES:
+        raise ValueError("This source returned too much data.")
+    return response
+
+
 class ScholarSearch:
     def __init__(self, api_key="", transport=None):
         self.api_key = api_key

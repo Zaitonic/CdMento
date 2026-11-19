@@ -230,6 +230,93 @@ class AttemptInput(Input):
     mode: Literal["practice", "exam"] = "practice"
 
 
+class ArtifactQuizQuestion(Input):
+    id: str = Field(min_length=1, max_length=100)
+    question: str = Field(min_length=1, max_length=1500)
+    options: list[dict] = Field(default_factory=list, max_length=6)
+    correct: str = Field(min_length=1, max_length=10)
+    explanation: str = Field(default="", max_length=3000)
+    concept: str = Field(default="", max_length=200)
+    source_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
+class ArtifactQuiz(Input):
+    id: str = Field(min_length=1, max_length=100)
+    notebook: str = Field(min_length=1, max_length=100)
+    kind: Literal["quiz"] = "quiz"
+    title: str = Field(default="", max_length=200)
+    questions: list[ArtifactQuizQuestion] = Field(min_length=1, max_length=50)
+
+
+class ArtifactFlashcard(Input):
+    id: str = Field(min_length=1, max_length=100)
+    question: str = Field(min_length=1, max_length=1500)
+    answer: str = Field(min_length=1, max_length=3000)
+    concept: str = Field(default="", max_length=200)
+    source_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
+class ArtifactFlashcards(Input):
+    id: str = Field(min_length=1, max_length=100)
+    notebook: str = Field(min_length=1, max_length=100)
+    kind: Literal["flashcards"] = "flashcards"
+    title: str = Field(default="", max_length=200)
+    cards: list[ArtifactFlashcard] = Field(min_length=1, max_length=50)
+
+
+class ArtifactNode(Input):
+    id: str = Field(min_length=1, max_length=100)
+    label: str = Field(min_length=1, max_length=200)
+    source_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
+class ArtifactEdge(Input):
+    source: str = Field(min_length=1, max_length=100)
+    target: str = Field(min_length=1, max_length=100)
+    label: str = Field(default="", max_length=100)
+
+
+class ArtifactMindmap(Input):
+    id: str = Field(min_length=1, max_length=100)
+    notebook: str = Field(min_length=1, max_length=100)
+    kind: Literal["mindmap"] = "mindmap"
+    title: str = Field(default="", max_length=200)
+    nodes: list[ArtifactNode] = Field(min_length=1, max_length=60)
+    edges: list[ArtifactEdge] = Field(default_factory=list, max_length=100)
+
+
+class ArtifactGuideQuestion(Input):
+    id: str = Field(min_length=1, max_length=100)
+    question: str = Field(min_length=1, max_length=1500)
+    answer: str = Field(min_length=1, max_length=3000)
+    concept: str = Field(default="", max_length=200)
+    source_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
+class ArtifactGuide(Input):
+    id: str = Field(min_length=1, max_length=100)
+    notebook: str = Field(min_length=1, max_length=100)
+    kind: Literal["guide"] = "guide"
+    title: str = Field(default="", max_length=200)
+    questions: list[ArtifactGuideQuestion] = Field(default_factory=list, max_length=50)
+
+
+ArtifactInput = ArtifactQuiz | ArtifactFlashcards | ArtifactMindmap | ArtifactGuide
+
+
+def validate_artifact(value):
+    """Validate an imported artifact against its kind-specific schema.
+
+    Pydantic unions do not expose a model_validate shortcut, so the matching
+    variant is selected explicitly. Unknown kinds raise ValueError.
+    """
+    kind = value.get("kind")
+    for variant in (ArtifactQuiz, ArtifactFlashcards, ArtifactMindmap, ArtifactGuide):
+        if variant.model_fields.get("kind").default == kind:
+            return variant.model_validate(value)
+    raise ValueError("Artifact kind must be quiz, flashcards, mindmap, or guide.")
+
+
 class Submission(Input):
     answers: dict[str, str]
 

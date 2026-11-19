@@ -63,11 +63,10 @@ def test_expired_link_and_unknown_reset(auth):
     auth.mailer.send.assert_not_called()
 
 
-def test_google_user_cannot_create_duplicate_password_account(auth):
+def test_google_user_signup_is_generic_and_does_not_create_account(auth):
     auth.repo.put("__google_auth__", "accounts", {"id": "google_user", "email": "student@example.com"})
-    with pytest.raises(HTTPException) as error:
-        auth.signup("STUDENT@example.com", "original-password", "Student", "test")
-    assert error.value.status_code == 409
+    result = auth.signup("STUDENT@example.com", "original-password", "Student", "test")
+    assert result["message"] == "If this email can be registered, check your inbox for next steps."
     assert auth.repo.list(AUTH_OWNER, "accounts") == []
     auth.mailer.send.assert_not_called()
 
@@ -82,12 +81,10 @@ def test_unverified_account_can_reset_and_becomes_verified(auth):
     assert session["profile"]["emailVerified"] is True
 
 
-def test_google_account_reset_request_explains_google_signin(auth):
+def test_google_account_reset_request_is_generic(auth):
     auth.repo.put(
         "__google_auth__", "accounts", {"id": "google_user", "email": "student@example.com"}
     )
-    with pytest.raises(HTTPException) as error:
-        auth.request_reset("Student@Example.com", "test")
-    assert error.value.status_code == 409
-    assert "Google" in error.value.detail
+    result = auth.request_reset("Student@Example.com", "test")
+    assert result["message"] == "If an account exists for this email, reset instructions will be sent."
     auth.mailer.send.assert_not_called()
