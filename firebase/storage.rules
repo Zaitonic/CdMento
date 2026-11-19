@@ -1,8 +1,8 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    match /users/{userId}/{allPaths=**} {
-      // Firebase Admin in Python uses server IAM, never browser write access.
+    // The Python API uses server credentials; browser clients have no direct access.
+    match /{allPaths=**} {
       allow read, write: if false;
     }
   }
