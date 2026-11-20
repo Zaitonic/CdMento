@@ -31,6 +31,10 @@ class PasswordAuth:
     def email_id(email):
         return hashlib.sha256(email.strip().casefold().encode()).hexdigest()
 
+    def account(self, email):
+        """The stored account for an email, if one exists (admin listing/signup)."""
+        return self.repo.get(AUTH_OWNER, "accounts", self.email_id(email))
+
     @staticmethod
     def _scrypt_hash(password, salt):
         return hashlib.scrypt(
@@ -162,6 +166,8 @@ class PasswordAuth:
             raise HTTPException(401, "The email or password is incorrect. Please try again.")
         if not self._verify_and_migrate(account, password):
             raise HTTPException(401, "The email or password is incorrect. Please try again.")
+        if account.get("disabled"):
+            raise HTTPException(403, "This account has been disabled. Contact the CdMento administrator.")
         with self.lock:
             self.attempts[("login", client)].clear()
         token = "account_" + secrets.token_urlsafe(32)

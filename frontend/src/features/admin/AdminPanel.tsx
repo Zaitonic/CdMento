@@ -31,6 +31,14 @@ import { useSession } from "../../lib/Session";
 import { UsersPage } from "./UsersPage";
 import "./admin.css";
 
+function authMethodClass(method?: string) {
+  const key = (method || "").toLowerCase();
+  if (key === "google") return "admin-badge-google";
+  if (key === "email" || key === "password") return "admin-badge-email";
+  if (key === "local-demo" || key === "demo") return "admin-badge-local-demo";
+  return "admin-badge-firebase";
+}
+
 type TabKind =
   | "dashboard"
   | "access"
@@ -519,7 +527,19 @@ export default function AdminPanel() {
         <div className="admin-content">
           {/* Always Visible: KPI Cards Grid */}
           <section className="admin-kpi-grid">
-            <div className="admin-kpi-card">
+            <div
+              className="admin-kpi-card clickable"
+              onClick={() => navigate("/admin/users")}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  navigate("/admin/users");
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              title="Open Users / Accounts"
+            >
               <div className="admin-kpi-icon bg-purple-50 text-purple-600 dark:bg-purple-950 dark:text-purple-300">
                 <Users size={24} />
               </div>
@@ -599,7 +619,7 @@ export default function AdminPanel() {
                         <tr key={log.id}>
                           <td className="font-medium text-xs">{log.email}</td>
                           <td>
-                            <span className="admin-badge secondary">
+                            <span className={`admin-badge ${authMethodClass(log.auth_method)}`}>
                               {log.auth_method}
                             </span>
                           </td>
@@ -611,7 +631,9 @@ export default function AdminPanel() {
                             </span>
                           </td>
                           <td className="text-xs text-gray-500">
-                            {new Date(log.timestamp).toLocaleTimeString([], {
+                            {new Date(log.timestamp).toLocaleString([], {
+                              month: "short",
+                              day: "numeric",
                               hour: "2-digit",
                               minute: "2-digit",
                             })}
@@ -798,7 +820,7 @@ export default function AdminPanel() {
                             {new Date(log.timestamp).toLocaleString()}
                           </td>
                           <td>
-                            <span className="admin-badge secondary font-mono">
+                            <span className={`admin-badge ${authMethodClass(log.auth_method)} font-mono`}>
                               {log.auth_method}
                             </span>
                           </td>

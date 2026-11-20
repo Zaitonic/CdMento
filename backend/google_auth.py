@@ -63,6 +63,13 @@ class GoogleAuth:
     def email_id(email):
         return hashlib.sha256(email.strip().casefold().encode()).hexdigest()
 
+    @staticmethod
+    def _ensure_active(account):
+        if account.get("disabled"):
+            raise HTTPException(
+                403, "This account has been disabled. Contact the CdMento administrator."
+            )
+
     def _session(self, account, remember):
         now = time.time()
         token = "google_" + secrets.token_urlsafe(32)
@@ -85,6 +92,7 @@ class GoogleAuth:
         uid = "google_" + hashlib.sha256(subject.encode()).hexdigest()
         account = self.repo.get(AUTH_OWNER, "accounts", uid)
         if account:
+            self._ensure_active(account)
             return {"requires_signup": False, **self._session(account, remember)}
         return {
             "requires_signup": True,
@@ -97,6 +105,7 @@ class GoogleAuth:
         uid = "google_" + hashlib.sha256(subject.encode()).hexdigest()
         account = self.repo.get(AUTH_OWNER, "accounts", uid)
         if account:
+            self._ensure_active(account)
             return {"requires_signup": False, **self._session(account, remember)}
 
         now = time.time()
@@ -119,6 +128,7 @@ class GoogleAuth:
             # Do not reveal whether this email is tied to a password account;
             # both paths return the same message and status.
             raise HTTPException(404, "No CdMento account uses this Google account yet.")
+        self._ensure_active(account)
 
         account = self.repo.put(
             AUTH_OWNER,

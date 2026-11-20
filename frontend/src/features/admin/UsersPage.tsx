@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { useSession } from "../../lib/Session";
+import { useNavigate } from "react-router-dom";
 import { api, json } from "../../lib/api";
-import { ArrowLeft, CheckCircle2, Download, RefreshCw, Search, Shield, X, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Download, RefreshCw, Search, Shield, AlertTriangle, X, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 interface User {
@@ -65,15 +64,45 @@ interface FeedbackTicket {
   updated_at?: string;
 }
 
+interface UserListResponse {
+  items?: User[];
+  total?: number;
+  warnings?: string[];
+  degraded?: boolean;
+  sources?: Record<string, number>;
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
+}
+
+function formatDay(value?: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  "firebase-auth": "Firebase Auth",
+  "google-auth": "Google sign-in",
+  "email-password": "Email signup",
+  "local-demo": "Local demo",
+  profile: "Profiles",
+};
+
 export const UsersPage = () => {
   const navigate = useNavigate();
-  const { user, logout } = useSession();
   const [search, setSearch] = useState("");
   const [users, setUsers] = useState<User[]>([]);
+  const [total, setTotal] = useState<number | null>(null);
+  const [sourceCounts, setSourceCounts] = useState<Record<string, number>>({});
   const [selectedUser, setSelectedUser] = useState<UserDetail | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [roleFilter, setRoleFilter] = useState("");
   const [providerFilter, setProviderFilter] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
@@ -82,8 +111,11 @@ export const UsersPage = () => {
       try {
         setLoading(true);
         setError(null);
-        const res = await api("/admin/users", { cache: "no-store" });
+        const res = await api<UserListResponse>("/admin/users", { cache: "no-store" });
         setUsers(res.items || []);
+        setTotal(res.total ?? null);
+        setSourceCounts(res.sources || {});
+        setWarnings(res.warnings || []);
       } catch (e) {
         const message = e instanceof Error ? e.message : "Failed to load users";
         setError(message);
@@ -95,14 +127,21 @@ export const UsersPage = () => {
 
   useEffect(() => {
     fetchUsers();
+    // Live enough for an admin console without re-reading every account
+    // collection on each short poll.
     const refreshTimer = window.setInterval(() => {
       if (!document.hidden) fetchUsers();
-    }, 10000);
+    }, 60000);
     const handleFocus = () => fetchUsers();
+    const handleVisibility = () => {
+      if (!document.hidden) fetchUsers();
+    };
     window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
     return () => {
       window.clearInterval(refreshTimer);
       window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, []);
 
@@ -130,35 +169,55 @@ export const UsersPage = () => {
     }
   };
 
-  // Handle role change
+  // Handle role change (confirmation required before removing admin access)
   const handleRoleChange = async (uid: string, newRole: string) => {
+    const target = users.find((item) => item.uid === uid);
+    if (
+      newRole === "student" &&
+      !window.confirm(
+        `Remove administrator access from ${target?.email || uid}? They will keep their student workspace.`,
+      )
+    )
+      return;
     try {
       await api(`/admin/users/${uid}/role`, {
         method: "PATCH",
         body: json({ role: newRole }),
       });
       toast.success(`Role updated to ${newRole}`);
-      // Refresh users
-      const res = await api("/admin/users", { cache: "no-store" });
-      setUsers(res.items || []);
+      setSelectedUser((current) =>
+        current && current.uid === uid ? { ...current, role: newRole } : current,
+      );
+      await fetchUsers();
     } catch (e) {
-      toast.error("Failed to update role");
+      const message = e instanceof Error ? e.message : "Failed to update role";
+      toast.error(message);
     }
   };
 
-  // Handle disable/enable
+  // Handle disable/enable (confirmation required before disabling)
   const handleDisable = async (uid: string, disabled: boolean) => {
+    const target = users.find((item) => item.uid === uid);
+    if (
+      disabled &&
+      !window.confirm(
+        `Disable ${target?.email || uid}? They will be signed out and blocked from signing in until re-enabled.`,
+      )
+    )
+      return;
     try {
       await api(`/admin/users/${uid}/status`, {
         method: "PATCH",
         body: json({ disabled }),
       });
       toast.success(`Account ${disabled ? "disabled" : "enabled"}`);
-      // Refresh users
-      const res = await api("/admin/users", { cache: "no-store" });
-      setUsers(res.items || []);
+      setSelectedUser((current) =>
+        current && current.uid === uid ? { ...current, disabled } : current,
+      );
+      await fetchUsers();
     } catch (e) {
-      toast.error("Failed to update account status");
+      const message = e instanceof Error ? e.message : "Failed to update account status";
+      toast.error(message);
     }
   };
 
@@ -193,6 +252,16 @@ export const UsersPage = () => {
             <h1 className="admin-title">Users / Accounts</h1>
             <p className="admin-subtitle">
               Manage all registered accounts, roles, and access status.
+              {total !== null && (
+                <span className="admin-source-counts">
+                  {" "}
+                  · {total} accounts
+                  {Object.keys(sourceCounts).length > 0 &&
+                    ` (${Object.entries(sourceCounts)
+                      .map(([key, count]) => `${SOURCE_LABELS[key] || key}: ${count}`)
+                      .join(" · ")})`}
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -205,6 +274,32 @@ export const UsersPage = () => {
           </button>
         </div>
       </div>
+
+      {error && (
+        <div className="admin-alert admin-alert-error" role="alert">
+          <AlertTriangle size={18} />
+          <div>
+            <strong>Could not load accounts.</strong>
+            <p>{error}</p>
+            <button className="admin-btn" onClick={fetchUsers}>
+              <RefreshCw size={14} /> Retry
+            </button>
+          </div>
+        </div>
+      )}
+      {warnings.length > 0 && (
+        <div className="admin-alert admin-alert-warning" role="status">
+          <AlertTriangle size={18} />
+          <div>
+            <strong>Some account sources could not be read.</strong>
+            <ul>
+              {warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="admin-filters">
@@ -235,6 +330,7 @@ export const UsersPage = () => {
           <option value="google">Google</option>
           <option value="email">Email</option>
           <option value="local-demo">Local Demo</option>
+          <option value="firebase">Firebase</option>
         </select>
         <select
           value={filterStatus}
@@ -317,12 +413,10 @@ export const UsersPage = () => {
                     )}
                   </td>
                   <td className="admin-date">
-                    {new Date(user.created_at).toLocaleDateString()}
+                    {formatDay(user.created_at)}
                   </td>
                   <td className="admin-date">
-                    {user.last_sign_in_at
-                      ? new Date(user.last_sign_in_at).toLocaleString()
-                      : "Never"}
+                    {formatDate(user.last_sign_in_at)}
                   </td>
                   <td>{user.login_count}</td>
                   <td>
@@ -408,15 +502,13 @@ export const UsersPage = () => {
                 <div className="admin-detail-row">
                   <span className="admin-detail-label">Created:</span>
                   <span className="admin-detail-value">
-                    {new Date(selectedUser.created_at).toLocaleString()}
+                    {formatDate(selectedUser.created_at)}
                   </span>
                 </div>
                 <div className="admin-detail-row">
                   <span className="admin-detail-label">Last Sign In:</span>
                   <span className="admin-detail-value">
-                    {selectedUser.last_sign_in_at
-                      ? new Date(selectedUser.last_sign_in_at).toLocaleString()
-                      : "Never"}
+                    {formatDate(selectedUser.last_sign_in_at)}
                   </span>
                 </div>
               </div>

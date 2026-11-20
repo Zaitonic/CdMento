@@ -576,8 +576,19 @@ def create_app(config=None, services=None):
         except Exception:
             pass
 
-    def upsert_user_profile(uid, email, display_name, provider, claims=None, preserve_display_name=False):
+    def upsert_user_profile(
+        uid,
+        email,
+        display_name,
+        provider,
+        claims=None,
+        preserve_display_name=False,
+        email_verified=None,
+        mark_sign_in=True,
+    ):
         """Keep the admin-facing account profile in sync after authentication."""
+        if not uid:
+            return None
         claims = claims or {}
         email = (email or "").strip().casefold()
         previous = repo.get(uid, "profile", "account") or {}
@@ -600,8 +611,9 @@ def create_app(config=None, services=None):
                 "display_name": previous.get("display_name") if preserve_display_name and previous.get("display_name") else (display_name or previous.get("display_name") or email.split("@", 1)[0]),
                 "provider": provider,
                 "role": role,
+                "email_verified": previous.get("email_verified", False) if email_verified is None else bool(email_verified),
                 "created_at": previous.get("created_at", now()),
-                "last_sign_in_at": now(),
+                "last_sign_in_at": now() if mark_sign_in else previous.get("last_sign_in_at"),
                 "updated_at": now(),
             },
         )
@@ -618,102 +630,240 @@ def create_app(config=None, services=None):
             return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
         return value
 
-    def _profile_records():
+    def _profile_records(warnings):
+        """Every account profile, whichever sign-in method created it."""
         if isinstance(repo, FirestoreRepository):
             records = {}
-            for snapshot in repo.db.collection("users").stream():
-                value = repo.decode(snapshot.to_dict()) or {}
-                if value:
-                    records[snapshot.id] = value
-            for snapshot in repo.db.collection_group("profile").stream():
-                owner_ref = snapshot.reference.parent.parent
-                if owner_ref is None:
-                    continue
-                records[owner_ref.id] = {
-                    **records.get(owner_ref.id, {}),
-                    **(repo.decode(snapshot.to_dict()) or {}),
-                }
+            try:
+                for snapshot in repo.db.collection("users").stream():
+                    value = repo.decode(snapshot.to_dict()) or {}
+                    if value:
+                        records[snapshot.id] = value
+            except Exception as error:
+                detail = f"{type(error).__name__}: {error}"
+                logging.getLogger("cdmento").exception(
+                    "Listing user profile roots failed: %s", detail
+                )
+                warnings.append(f"Listing user profiles failed ({detail}).")
+            try:
+                for snapshot in repo.db.collection_group("profile").stream():
+                    owner_ref = snapshot.reference.parent.parent
+                    if owner_ref is None:
+                        continue
+                    records[owner_ref.id] = {
+                        **records.get(owner_ref.id, {}),
+                        **(repo.decode(snapshot.to_dict()) or {}),
+                    }
+            except Exception as error:
+                detail = f"{type(error).__name__}: {error}"
+                logging.getLogger("cdmento").exception(
+                    "Listing account profiles failed: %s", detail
+                )
+                warnings.append(f"Listing account profiles failed ({detail}).")
             return records
         with repo.connection() as db:
             rows = db.execute(
-                "SELECT owner, body FROM records WHERE kind='profile' AND owner NOT LIKE '__%'"
+                "SELECT owner, body FROM records WHERE kind='profile'"
             ).fetchall()
-        return {owner: json.loads(body) for owner, body in rows}
+        # Owner keys such as "__system_admin__" are bookkeeping, not people.
+        return {
+            owner: json.loads(body)
+            for owner, body in rows
+            if not owner.startswith("__")
+        }
 
-    def _firebase_auth_users():
+    def _firebase_auth_users(warnings):
+        """Firebase Auth users, or a recorded error instead of a silent gap.
+
+        Custom Google/email accounts live in the CdMento auth collections, so a
+        Firebase failure must never abort the whole listing.
+        """
+        if not (
+            service.settings.auth_mode == "firebase"
+            or service.settings.data_backend == "firestore"
+        ):
+            return []
         try:
             from firebase_admin import auth
 
             return list(auth.list_users().iterate_all())
         except Exception as error:
-            logging.getLogger("cdmento").exception("Firebase Admin user listing failed")
-            raise HTTPException(
-                503,
-                f"Firebase Admin user listing failed: {type(error).__name__}: {error}",
-            ) from error
+            detail = f"{type(error).__name__}: {error}"
+            logging.getLogger("cdmento").exception(
+                "Firebase Admin user listing failed: %s", detail
+            )
+            warnings.append(
+                "Firebase Auth listing failed ("
+                + detail
+                + "). Check FIREBASE_SERVICE_ACCOUNT_JSON, FIREBASE_PROJECT_ID, "
+                "and that the Identity Toolkit API is enabled."
+            )
+            return []
 
-    def merged_admin_users():
-        profiles = _profile_records()
+    _provider_labels = {
+        "google.com": "google",
+        "google": "google",
+        "password": "email",
+        "email": "email",
+        "local-demo": "local-demo",
+        "firebase": "firebase",
+    }
+
+    def _provider_label(value):
+        raw = (value or "").strip()
+        return _provider_labels.get(raw.casefold(), raw.casefold() or "unknown")
+
+    def _admin_email_set():
+        return {
+            value.strip().casefold()
+            for value in getattr(service.settings, "admin_emails", "").split(",")
+            if value.strip()
+        }
+
+    def _effective_role(email, role):
+        if (role or "").strip().casefold() == "admin":
+            return "admin"
+        if (email or "").strip().casefold() in _admin_email_set():
+            return "admin"
+        return "student"
+
+    def _account_owner(uid, owner):
+        account_id = uid.removeprefix("email_") if owner == "__email_password_auth__" else uid
+        return repo.get(owner, "accounts", account_id)
+
+    def _set_custom_account_disabled(uid, disabled):
+        """Mirror the flag onto custom auth records so login can enforce it."""
+        for owner in ("__google_auth__", "__email_password_auth__"):
+            account = _account_owner(uid, owner)
+            if account:
+                repo.put(
+                    owner,
+                    "accounts",
+                    {**account, "disabled": bool(disabled), "updated_at": now()},
+                )
+
+    def merged_admin_users(warnings=None):
+        """Firebase Auth + custom Google/email accounts + Firestore profiles.
+
+        Every source is merged, and a user with no profile document is still
+        listed. Source failures are reported through ``warnings`` rather than
+        returning silently incomplete data.
+        """
+        warnings = warnings if warnings is not None else []
+        profiles = _profile_records(warnings)
         merged = {}
 
-        if service.settings.auth_mode == "firebase" or service.settings.data_backend == "firestore":
-            for record in _firebase_auth_users():
-                providers = [item.provider_id for item in (record.provider_data or [])]
-                provider = providers[0] if providers else "firebase"
-                provider = {"google.com": "google", "password": "password"}.get(provider, provider)
-                merged[record.uid] = {
-                    "uid": record.uid,
-                    "email": record.email or "",
-                    "display_name": record.display_name or "",
-                    "provider": provider,
-                    "disabled": bool(record.disabled),
-                    "email_verified": bool(record.email_verified),
-                    "created_at": _iso_timestamp(record.user_metadata.creation_timestamp),
-                    "last_sign_in_at": _iso_timestamp(record.user_metadata.last_sign_in_timestamp),
-                    "role": "admin" if (record.custom_claims or {}).get("admin") else "student",
-                    "login_count": 0,
-                    "activity_count": 0,
-                }
-
-        if service.settings.data_backend == "sqlite":
-            for owner, kind in (("__google_auth__", "accounts"), ("__email_password_auth__", "accounts")):
-                for account in repo.list(owner, kind):
-                    uid = account.get("uid") or account.get("id")
-                    if uid:
-                        merged[uid] = {
-                            "uid": uid,
-                            "email": account.get("email", ""),
-                            "display_name": account.get("display_name", ""),
-                            "provider": "google" if owner == "__google_auth__" else "password",
-                            "disabled": bool(account.get("disabled", False)),
-                            "email_verified": bool(account.get("email_verified", False)),
-                            "created_at": _account_timestamp(account.get("created_at")),
-                            "last_sign_in_at": account.get("last_sign_in_at"),
-                            "role": account.get("role", "student"),
-                            "login_count": 0,
-                            "activity_count": 0,
-                        }
-
-        for uid, profile in profiles.items():
-            current = merged.get(uid, {"uid": uid, "disabled": False, "email_verified": False, "login_count": 0, "activity_count": 0})
-            merged[uid] = {
-                **current,
-                "email": profile.get("email", current.get("email", "")),
-                "display_name": profile.get("display_name", current.get("display_name", "")),
-                "provider": profile.get("provider", current.get("provider", "unknown")),
-                "role": "admin" if current.get("role") == "admin" else profile.get("role", current.get("role", "student")),
-                "disabled": profile.get("disabled", current.get("disabled", False)),
-                "created_at": profile.get("created_at", current.get("created_at")),
-                "last_sign_in_at": profile.get("last_sign_in_at", current.get("last_sign_in_at")),
+        for record in _firebase_auth_users(warnings):
+            providers = [item.provider_id for item in (record.provider_data or [])]
+            email = (record.email or "").strip().casefold()
+            claims = record.custom_claims or {}
+            merged[record.uid] = {
+                "uid": record.uid,
+                "email": email,
+                "display_name": record.display_name or "",
+                "provider": _provider_label(providers[0] if providers else "firebase"),
+                "disabled": bool(record.disabled),
+                "email_verified": bool(record.email_verified),
+                "created_at": _iso_timestamp(record.user_metadata.creation_timestamp),
+                "last_sign_in_at": _iso_timestamp(record.user_metadata.last_sign_in_timestamp),
+                "role": _effective_role(email, "admin" if claims.get("admin") is True else "student"),
+                "login_count": 0,
+                "activity_count": 0,
+                "sources": ["firebase-auth"],
             }
 
-        logs = repo.list("__system_admin__", "access_logs")
-        activities = repo.list("__system_admin__", "activity_logs")
+        # These collections are the account registry for Google and email
+        # sign-in on BOTH storage backends. Reading them only for SQLite was
+        # why production (Firestore) missed accounts without a profile doc.
+        for owner, provider, source in (
+            ("__google_auth__", "google", "google-auth"),
+            ("__email_password_auth__", "email", "email-password"),
+            ("__local_demo_auth__", "local-demo", "local-demo"),
+        ):
+            try:
+                accounts = repo.list(owner, "accounts") or []
+            except Exception as error:
+                detail = f"{type(error).__name__}: {error}"
+                logging.getLogger("cdmento").exception(
+                    "Listing %s accounts failed: %s", owner, detail
+                )
+                warnings.append(f"Listing {source} accounts failed ({detail}).")
+                continue
+            for account in accounts:
+                uid = account.get("uid") or account.get("id")
+                if not uid:
+                    continue
+                email = (account.get("email") or "").strip().casefold()
+                current = merged.get(uid, {})
+                sources = sorted({*current.get("sources", []), source})
+                merged[uid] = {
+                    **current,
+                    "uid": uid,
+                    "email": email or current.get("email", ""),
+                    "display_name": account.get("display_name")
+                    or account.get("name")
+                    or current.get("display_name", ""),
+                    "provider": provider,
+                    "disabled": bool(account.get("disabled", current.get("disabled", False))),
+                    "email_verified": bool(account.get("email_verified", current.get("email_verified", False))),
+                    "created_at": current.get("created_at") or _account_timestamp(account.get("created_at")),
+                    "last_sign_in_at": _account_timestamp(account.get("last_sign_in_at"))
+                    or current.get("last_sign_in_at"),
+                    "role": _effective_role(email, current.get("role") or account.get("role", "student")),
+                    "login_count": 0,
+                    "activity_count": 0,
+                    "sources": sources,
+                }
+
+        for uid, profile in profiles.items():
+            email = (profile.get("email") or "").strip().casefold()
+            current = merged.get(uid, {})
+            roles = {
+                (current.get("role") or "").strip().casefold(),
+                (profile.get("role") or "").strip().casefold(),
+            }
+            sources = sorted({*current.get("sources", []), "profile"})
+            merged[uid] = {
+                **current,
+                "uid": uid,
+                "email": email or current.get("email", ""),
+                "display_name": profile.get("display_name") or current.get("display_name", ""),
+                "provider": _provider_label(profile.get("provider") or current.get("provider")),
+                "role": _effective_role(email, "admin" if "admin" in roles else "student"),
+                "disabled": bool(profile.get("disabled", current.get("disabled", False))),
+                "email_verified": bool(profile.get("email_verified", current.get("email_verified", False))),
+                "created_at": current.get("created_at") or profile.get("created_at"),
+                "last_sign_in_at": profile.get("last_sign_in_at") or current.get("last_sign_in_at"),
+                "login_count": 0,
+                "activity_count": 0,
+                "sources": sources,
+            }
+
+        logs = repo.list("__system_admin__", "access_logs") or []
+        activities = repo.list("__system_admin__", "activity_logs") or []
         for item in merged.values():
-            email = item["email"].casefold()
-            item["login_count"] = sum(1 for log in logs if log.get("email", "").casefold() == email and log.get("status") == "success")
-            item["activity_count"] = sum(1 for log in activities if log.get("user", "").casefold() == email)
-        return sorted(merged.values(), key=lambda item: item.get("created_at") or "", reverse=True)
+            email = (item.get("email") or "").strip().casefold()
+            successes = [
+                log
+                for log in logs
+                if (log.get("email") or "").strip().casefold() == email
+                and log.get("status") == "success"
+            ]
+            item["login_count"] = len(successes)
+            item["activity_count"] = sum(
+                1
+                for log in activities
+                if (log.get("user") or "").strip().casefold() == email
+            )
+            if not item.get("last_sign_in_at") and successes:
+                item["last_sign_in_at"] = max(
+                    (log.get("timestamp") or "" for log in successes), default=None
+                )
+            item.setdefault("sources", [])
+            item.setdefault("email_verified", False)
+        return sorted(
+            merged.values(), key=lambda item: item.get("created_at") or "", reverse=True
+        )
 
     @app.get("/api/v1/admin/users")
     def admin_users_list(
@@ -723,49 +873,120 @@ def create_app(config=None, services=None):
         search: str | None = None,
         role: str | None = None,
         provider: str | None = None,
+        status: str | None = None,
     ):
-        items = merged_admin_users()
+        warnings: list[str] = []
+        items = merged_admin_users(warnings)
         if search:
-            needle = search.casefold()
-            items = [item for item in items if needle in item["uid"].casefold() or needle in item["email"].casefold() or needle in item["display_name"].casefold()]
+            needle = search.strip().casefold()
+            items = [
+                item
+                for item in items
+                if needle in (item.get("uid") or "").casefold()
+                or needle in (item.get("email") or "").casefold()
+                or needle in (item.get("display_name") or "").casefold()
+            ]
         if role:
             items = [item for item in items if item["role"] == role]
         if provider:
             items = [item for item in items if item["provider"] == provider]
-        return {"items": items[skip:] if limit is None else items[skip : skip + limit], "total": len(items)}
+        if status in ("active", "disabled"):
+            want_disabled = status == "disabled"
+            items = [item for item in items if bool(item.get("disabled")) is want_disabled]
+        total = len(items)
+        skip = max(skip, 0)
+        if limit is not None:
+            limit = max(1, min(limit, 1000))
+        window = items[skip:] if limit is None else items[skip : skip + limit]
+        source_counts: dict[str, int] = {}
+        for item in items:
+            for source in item.get("sources", []):
+                source_counts[source] = source_counts.get(source, 0) + 1
+        return {
+            "items": window,
+            "total": total,
+            "warnings": warnings,
+            "degraded": bool(warnings),
+            "sources": source_counts,
+        }
+
+    def _admin_user_record(uid):
+        return next((item for item in merged_admin_users() if item["uid"] == uid), None)
+
+    def _ensure_user_profile(uid, **fields):
+        """Create a profile even for accounts that never had one written."""
+        profile = repo.get(uid, "profile", "account")
+        if not profile:
+            record = _admin_user_record(uid) or {}
+            email = record.get("email", "")
+            profile = {
+                "id": "account",
+                "email": email,
+                "display_name": record.get("display_name")
+                or (email.split("@", 1)[0] if email else ""),
+                "provider": record.get("provider", "unknown"),
+                "created_at": record.get("created_at") or now(),
+            }
+        if not profile:
+            raise HTTPException(404, "User not found.")
+        return repo.put(
+            uid,
+            "profile",
+            {**profile, "id": "account", **fields, "updated_at": now()},
+        )
 
     @app.patch("/api/v1/admin/users/{uid}/role")
     def admin_user_role(uid: str, data: dict, admin: AdminOwner):
-        role = data.get("role")
+        role = (data.get("role") or "").strip().casefold()
         if role not in ("admin", "student"):
             raise HTTPException(400, "Role must be admin or student.")
-        profile = repo.get(uid, "profile", "account")
-        if not profile:
-            raise HTTPException(404, "User profile not found.")
-        repo.put(uid, "profile", {**profile, "role": role, "updated_at": now()})
-        return {"uid": uid, "role": role}
+        _ensure_user_profile(uid, role=role)
+        warnings: list[str] = []
+        if service.settings.data_backend == "firestore" or service.settings.auth_mode == "firebase":
+            try:
+                from firebase_admin import auth
+
+                firebase_user = auth.get_user(uid)
+                claims = dict(firebase_user.custom_claims or {})
+                claims["admin"] = role == "admin"
+                auth.update_user(uid, custom_claims=claims)
+            except Exception as error:
+                # Custom Google/email accounts are not Firebase Auth users; that
+                # is expected. Only genuine claim-sync failures are surfaced.
+                if type(error).__name__ not in ("UserNotFoundError", "ValueError"):
+                    detail = f"{type(error).__name__}: {error}"
+                    logging.getLogger("cdmento").exception(
+                        "Role claim sync failed for %s: %s", uid, detail
+                    )
+                    warnings.append(f"Role saved, but Firebase claims were not updated ({detail}).")
+        return {"uid": uid, "role": role, "warnings": warnings}
 
     @app.patch("/api/v1/admin/users/{uid}/status")
     def admin_user_status(uid: str, data: dict, admin: AdminOwner):
         disabled = bool(data.get("disabled"))
-        if service.settings.auth_mode == "firebase" or service.settings.data_backend == "firestore":
+        _ensure_user_profile(uid, disabled=disabled)
+        _set_custom_account_disabled(uid, disabled)
+        warnings: list[str] = []
+        if service.settings.data_backend == "firestore" or service.settings.auth_mode == "firebase":
             try:
                 from firebase_admin import auth
 
-                auth.update_user(auth.get_user(uid).uid, disabled=disabled)
+                auth.update_user(uid, disabled=disabled)
             except Exception as error:
-                logging.getLogger("cdmento").exception("Firebase Admin status update failed for %s", uid)
-                raise HTTPException(503, f"Firebase Admin status update failed: {type(error).__name__}: {error}") from error
-        profile = repo.get(uid, "profile", "account") or {"id": "account"}
-        repo.put(uid, "profile", {**profile, "disabled": disabled, "updated_at": now()})
-        return {"uid": uid, "disabled": disabled}
+                if type(error).__name__ not in ("UserNotFoundError", "ValueError"):
+                    detail = f"{type(error).__name__}: {error}"
+                    logging.getLogger("cdmento").exception(
+                        "Firebase Admin status update failed for %s: %s", uid, detail
+                    )
+                    warnings.append(f"Account status saved, but Firebase was not updated ({detail}).")
+        return {"uid": uid, "disabled": disabled, "warnings": warnings}
 
     @app.get("/api/v1/admin/users/{uid}/details")
     def admin_user_details(uid: str, admin: AdminOwner):
-        user = next((item for item in merged_admin_users() if item["uid"] == uid), None)
+        user = _admin_user_record(uid)
         if not user:
             raise HTTPException(404, "User not found.")
-        email = user["email"].casefold()
+        email = (user.get("email") or "").casefold()
         logins = [item for item in repo.list("__system_admin__", "access_logs") if item.get("email", "").casefold() == email]
         activity = [item for item in repo.list("__system_admin__", "activity_logs") if item.get("user", "").casefold() == email]
         tickets = [item for item in repo.list("__system_admin__", "feedback") if item.get("user", "").casefold() == email]
@@ -782,6 +1003,7 @@ def create_app(config=None, services=None):
                 res["profile"]["email"],
                 res["profile"].get("displayName"),
                 "local-demo",
+                email_verified=True,
             )
             record_access_log(data.email, "local-demo", "success", client, "admin")
             return res
@@ -811,6 +1033,7 @@ def create_app(config=None, services=None):
             profile.get("email"),
             profile.get("displayName"),
             "google",
+            email_verified=True,
         )
         record_access_log(profile.get("email", "google-user"), "google", "success", client)
         return result
@@ -828,6 +1051,7 @@ def create_app(config=None, services=None):
                 email,
                 profile.get("displayName"),
                 "google",
+                email_verified=True,
             )
             record_access_log(email, "google", "success", client)
             return res
@@ -858,9 +1082,24 @@ def create_app(config=None, services=None):
             raise HTTPException(503, "Brevo email is not configured yet.")
         client = request.client.host if request.client else "unknown"
         try:
-            return email_auth(request).signup(
+            auth = email_auth(request)
+            result = auth.signup(
                 data.email, data.password, data.display_name, client
             )
+            # Create the profile immediately so a brand-new (not yet verified)
+            # signup is visible in Admin > Users before its first login.
+            account = auth.account(data.email)
+            if account:
+                upsert_user_profile(
+                    account.get("uid") or "email_" + account["id"],
+                    account.get("email"),
+                    account.get("display_name"),
+                    "email",
+                    email_verified=bool(account.get("email_verified")),
+                    mark_sign_in=False,
+                    preserve_display_name=True,
+                )
+            return result
         except RuntimeError:
             raise HTTPException(503, "The verification email could not be sent. Please try again.") from None
 
@@ -876,7 +1115,8 @@ def create_app(config=None, services=None):
                 profile.get("uid"),
                 profile.get("email") or data.email,
                 profile.get("displayName"),
-                "password",
+                "email",
+                email_verified=bool(profile.get("emailVerified", True)),
             )
             record_access_log(data.email, "email", "success", client)
             return res
@@ -974,7 +1214,7 @@ def create_app(config=None, services=None):
             if owner.startswith("google_"):
                 provider = "google"
             elif owner.startswith("email_"):
-                provider = "password"
+                provider = "email"
             upsert_user_profile(
                 owner,
                 email,
@@ -982,6 +1222,7 @@ def create_app(config=None, services=None):
                 provider,
                 claims,
                 preserve_display_name=True,
+                email_verified=claims.get("email_verified"),
             )
             existing = repo.get(owner, "profile", "account") or existing
         admin_emails = [
