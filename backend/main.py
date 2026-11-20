@@ -678,10 +678,11 @@ def create_app(config=None, services=None):
         Custom Google/email accounts live in the CdMento auth collections, so a
         Firebase failure must never abort the whole listing.
         """
-        if not (
-            service.settings.auth_mode == "firebase"
-            or service.settings.data_backend == "firestore"
-        ):
+        # Only query Firebase Auth when it is the configured identity provider.
+        # Google/email deployments keep their accounts in the custom auth
+        # collections, so calling Identity Toolkit there would always fail
+        # with a misleading API-not-enabled warning.
+        if service.settings.auth_mode != "firebase":
             return []
         try:
             from firebase_admin import auth

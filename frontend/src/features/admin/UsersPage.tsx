@@ -275,6 +275,7 @@ export const UsersPage = () => {
         </div>
       </div>
 
+      <div className="admin-content">
       {error && (
         <div className="admin-alert admin-alert-error" role="alert">
           <AlertTriangle size={18} />
@@ -344,7 +345,8 @@ export const UsersPage = () => {
       </div>
 
       {/* Users Table */}
-      <div className="admin-table-container">
+      {(loading || filteredUsers.length > 0) && (
+      <div className="admin-table-wrap">
         <table className="admin-table">
           <thead>
             <tr>
@@ -384,7 +386,9 @@ export const UsersPage = () => {
                         {user.display_name || "No name"}
                       </div>
                       <div className="admin-user-email">{user.email}</div>
-                      <div className="admin-user-uid">UID: {user.uid}</div>
+                      <div className="admin-user-uid" title={user.uid}>
+                        UID: {user.uid}
+                      </div>
                     </div>
                   </td>
                   <td>
@@ -418,7 +422,7 @@ export const UsersPage = () => {
                   <td className="admin-date">
                     {formatDate(user.last_sign_in_at)}
                   </td>
-                  <td>{user.login_count}</td>
+                  <td className="admin-num">{user.login_count}</td>
                   <td>
                     <div className="admin-actions">
                       <button
@@ -449,6 +453,7 @@ export const UsersPage = () => {
           </tbody>
         </table>
       </div>
+      )}
 
       {/* User Detail Drawer */}
       {drawerOpen && selectedUser && (
@@ -610,12 +615,21 @@ export const UsersPage = () => {
             <p className="mb-4">
               No users match your current filters. Try adjusting the search, role, or provider filters.
             </p>
-            <button className="admin-btn" onClick={() => setSearch("")}>
+            <button
+              className="admin-btn"
+              onClick={() => {
+                setSearch("");
+                setRoleFilter("");
+                setProviderFilter("");
+                setFilterStatus("");
+              }}
+            >
               Clear Filters
             </button>
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 };

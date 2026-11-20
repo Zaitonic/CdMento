@@ -1,5 +1,8 @@
 """Admin Users listing must merge every account source, not just profiles."""
 
+import sys
+import types
+
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
@@ -117,6 +120,32 @@ def test_users_merge_accounts_without_profile_documents(env):
     assert by_uid["email_hash-c"]["provider"] == "email"
     assert by_uid["email_hash-c"]["email_verified"] is False
     assert by_uid["google_a"]["sources"] == ["google-auth", "profile"]
+
+
+def test_firebase_auth_only_queried_in_firebase_mode(env, monkeypatch):
+    """Google/email deployments must not emit Identity Toolkit warnings."""
+    client, services = env
+
+    fake = types.ModuleType("firebase_admin")
+
+    class BrokenAuth:
+        @staticmethod
+        def list_users():
+            raise RuntimeError("Identity Toolkit API is disabled")
+
+    fake.auth = BrokenAuth
+    monkeypatch.setitem(sys.modules, "firebase_admin", fake)
+
+    services.settings.auth_mode = "google"
+    google_mode = client.get("/api/v1/admin/users").json()
+    assert google_mode["warnings"] == []
+
+    services.settings.auth_mode = "firebase"
+    firebase_mode = client.get("/api/v1/admin/users").json()
+    assert any(
+        "Firebase Auth listing failed" in warning
+        for warning in firebase_mode["warnings"]
+    )
 
 
 def test_role_update_creates_profile_for_profileless_account(env):
