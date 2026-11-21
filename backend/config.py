@@ -34,6 +34,19 @@ class Settings(BaseSettings):
     freellmapi_base_url: str = "http://127.0.0.1:3001/v1"
     freellmapi_model: str = "ministral-8b-latest"
     freellmapi_free_tier_confirmed: bool = False
+    gemini_api_key: str = ""
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    gemini_model: str = "gemini-2.5-flash"
+    cerebras_api_key: str = ""
+    cerebras_base_url: str = "https://api.cerebras.ai/v1"
+    cerebras_model: str = "gpt-oss-120b"
+    nvidia_api_key: str = ""
+    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
+    nvidia_model: str = "meta/llama-3.3-70b-instruct"
+    extra_ai_providers_json: str = ""
+    ai_provider_order: str = ""
+    ai_max_failover_attempts: int = Field(default=5, ge=1, le=10)
+    ai_request_timeout_seconds: int = Field(default=45, ge=5, le=60)
     semantic_scholar_api_key: str = ""
     ai_daily_requests: int = Field(default=100, ge=1, le=1000)
     ai_max_output_tokens: int = Field(default=2400, ge=512, le=4096)

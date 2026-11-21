@@ -1,6 +1,6 @@
 # Free AI setup for CdMento
 
-CdMento can route through **Groq, an optional OpenRouter free model, Cloudflare Workers AI, or the local FreeLLMAPI/Mistral prototype**. Providers are chosen automatically; the gateway falls through to the next configured provider when one reaches its free quota or has a temporary failure. Uploading/extracting/reading documents stays local to the backend and does not call a provider.
+CdMento can route through **Groq, OpenRouter, Cloudflare Workers AI, Mistral/FreeLLMAPI, Google AI Studio (Gemini), Cerebras, NVIDIA NIM, and any number of additional OpenAI-compatible endpoints**. Providers are chosen in configured order and fall through when one reaches its quota or has a temporary failure. Uploading/extracting/reading documents stays local to the backend and does not call a provider.
 
 ## Configure your own keys
 
@@ -24,6 +24,19 @@ Use only the providers you want: blank keys are skipped. `AI_FREE_TIER_CONFIRMED
 
 4. Restart `npm run dev:all` (or the API and any Celery workers). Sign in, add a readable source, and create a reviewer or ask a question. CdMento selects the first available provider and switches automatically when quota runs out.
 5. Never put keys in React, a `VITE_` variable, browser storage, screenshots, or chat messages. `.env` is ignored by source control. Set `AI_ENABLED=false` to turn off new provider calls.
+
+## Additional OpenAI-compatible providers
+
+The built-in Gemini, Cerebras, and NVIDIA presets activate only when their server-side key is set. You can add unlimited compatible providers (including Cohere, Hugging Face, SambaNova, GitHub Models, or a hosted FreeLLMAPI) with one JSON array:
+
+```dotenv
+AI_PROVIDER_ORDER=groq,gemini,backup-provider
+EXTRA_AI_PROVIDERS_JSON=[{"name":"backup-provider","base_url":"https://example.com/v1","api_key":"server-only-key","model":"my-model","enabled":true,"timeout_seconds":30,"extra_headers":{"X-Provider":"cdmento"}}]
+```
+
+URLs must use `https://` outside local development. In local mode only, `http://localhost/...` and `http://127.0.0.1/...` are allowed for local routers. Invalid entries are logged by name/index and skipped. Keys are never returned by the status endpoint or sent to the frontend. `AI_PROVIDER_ORDER` prioritizes named providers; all other enabled providers are appended automatically.
+
+The gateway caps failover attempts and total request time. Timeouts/network errors and 429/5xx responses use a short cooldown; authentication, payment, and permission failures use a longer cooldown. Upstream response bodies are not exposed to clients.
 
 ## Cost and privacy controls
 

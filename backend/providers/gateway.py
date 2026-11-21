@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import re
 import ssl
 import threading
@@ -9,8 +10,71 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from urllib.parse import urlsplit
 import httpx
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+log = logging.getLogger(__name__)
+
+
+class ExtraProviderConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=64)
+    base_url: str
+    api_key: str = Field(min_length=1)
+    model: str = Field(min_length=1, max_length=200)
+    enabled: bool = True
+    timeout_seconds: int = Field(default=30, ge=5, le=60)
+    extra_headers: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("name")
+    @classmethod
+    def valid_name(cls, value):
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", value):
+            raise ValueError("name must contain only letters, numbers, '.', '_' or '-'")
+        return value
+
+    @field_validator("base_url")
+    @classmethod
+    def valid_url(cls, value):
+        normalized = value.rstrip("/")
+        parsed = urlsplit(normalized)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError("base_url must use https://")
+        return normalized
+
+
+def parse_extra_providers(raw, local_mode=False):
+    """Parse optional server-only provider JSON; bad entries are skipped safely."""
+    if not raw:
+        return []
+    try:
+        values = json.loads(raw) if isinstance(raw, str) else raw
+        if not isinstance(values, list):
+            raise ValueError("must be a JSON array")
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        log.warning("Skipping EXTRA_AI_PROVIDERS_JSON: invalid JSON (%s)", exc)
+        return []
+    result = []
+    for index, item in enumerate(values):
+        try:
+            if local_mode and isinstance(item, dict):
+                url = str(item.get("base_url", ""))
+                parsed_url = urlsplit(url)
+                if parsed_url.scheme == "http" and parsed_url.hostname in {"localhost", "127.0.0.1"}:
+                    item = {**item, "base_url": url.rstrip("/").replace("http://", "https://", 1)}
+                    # Keep local URLs usable without weakening production validation.
+                    parsed = ExtraProviderConfig.model_validate(item)
+                    object.__setattr__(parsed, "base_url", url.rstrip("/"))
+                else:
+                    parsed = ExtraProviderConfig.model_validate(item)
+            else:
+                parsed = ExtraProviderConfig.model_validate(item)
+            if parsed.enabled:
+                result.append(parsed)
+        except (TypeError, ValueError, ValidationError) as exc:
+            log.warning("Skipping extra AI provider at index %s: invalid configuration (%s)", index, exc)
+    return result
 
 
 class AIUnavailable(ValueError):
@@ -33,6 +97,54 @@ class Provider:
     model: str
     key: str
     daily_limit: int
+    base_url: str = ""
+    extra_headers: dict = None
+    timeout_seconds: int = 45
+
+
+class OpenAICompatibleClient:
+    """Small server-side adapter shared by every /chat/completions provider."""
+
+    def __init__(self, provider, transport=None):
+        self.provider = provider
+        self.transport = transport
+
+    def complete(
+        self,
+        messages,
+        temperature=0.2,
+        max_tokens=2400,
+        response_format=None,
+        extra_payload=None,
+    ):
+        payload = {
+            "model": self.provider.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if response_format is not None:
+            payload["response_format"] = response_format
+        if extra_payload:
+            payload.update(extra_payload)
+        headers = {
+            **(self.provider.extra_headers or {}),
+            "Authorization": f"Bearer {self.provider.key}",
+        }
+        with httpx.Client(
+            transport=self.transport,
+            timeout=httpx.Timeout(
+                self.provider.timeout_seconds,
+                connect=min(10, self.provider.timeout_seconds),
+            ),
+            verify=ssl.create_default_context(),
+            follow_redirects=False,
+        ) as client:
+            return client.post(
+                f"{self.provider.base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+            )
 
 
 class Gateway:
@@ -57,6 +169,10 @@ class Gateway:
                 settings.openrouter_api_key,
                 settings.cloudflare_api_token,
                 settings.freellmapi_api_key,
+                settings.gemini_api_key,
+                settings.cerebras_api_key,
+                settings.nvidia_api_key,
+                settings.extra_ai_providers_json,
             )
         ):
             self.problem = "Add a Groq, OpenRouter, or Cloudflare key to the server .env file to enable AI."
@@ -82,6 +198,9 @@ class Gateway:
                     settings.freellmapi_model,
                     settings.freellmapi_api_key,
                     settings.ai_daily_requests,
+                    settings.freellmapi_base_url.rstrip("/"),
+                    {},
+                    settings.ai_request_timeout_seconds,
                 )
             )
         if settings.groq_api_key:
@@ -94,6 +213,9 @@ class Gateway:
                     settings.groq_model,
                     settings.groq_api_key,
                     settings.ai_daily_requests,
+                    "https://api.groq.com/openai/v1",
+                    {},
+                    settings.ai_request_timeout_seconds,
                 )
             )
         if settings.openrouter_api_key:
@@ -111,6 +233,9 @@ class Gateway:
                     model,
                     settings.openrouter_api_key,
                     min(40, settings.ai_daily_requests),
+                    "https://openrouter.ai/api/v1",
+                    {},
+                    settings.ai_request_timeout_seconds,
                 )
             )
         if (
@@ -135,8 +260,34 @@ class Gateway:
                     settings.cloudflare_model,
                     settings.cloudflare_api_token,
                     settings.ai_daily_requests,
+                    f"https://api.cloudflare.com/client/v4/accounts/{settings.cloudflare_account_id}/ai/v1",
+                    {},
+                    settings.ai_request_timeout_seconds,
                 )
             )
+        builtin = (
+            ("gemini", settings.gemini_api_key, settings.gemini_base_url, settings.gemini_model),
+            ("cerebras", settings.cerebras_api_key, settings.cerebras_base_url, settings.cerebras_model),
+            ("nvidia", settings.nvidia_api_key, settings.nvidia_base_url, settings.nvidia_model),
+        )
+        for name, key, base_url, model in builtin:
+            if key:
+                self.providers.append(Provider(name, model, key, settings.ai_daily_requests, base_url.rstrip("/"), {}, settings.ai_request_timeout_seconds))
+        existing = {p.name for p in self.providers}
+        for extra in parse_extra_providers(
+            settings.extra_ai_providers_json,
+            local_mode=settings.auth_mode == "local" and settings.data_backend == "sqlite",
+        ):
+            if extra.name in existing:
+                log.warning("Skipping extra AI provider %s: duplicate provider name", extra.name)
+                continue
+            self.providers.append(Provider(extra.name, extra.model, extra.api_key, settings.ai_daily_requests, extra.base_url, extra.extra_headers, extra.timeout_seconds))
+            existing.add(extra.name)
+        order = [name.strip() for name in settings.ai_provider_order.split(",") if name.strip()]
+        if order:
+            by_name = {p.name: p for p in self.providers}
+            self.providers = [by_name[name] for name in order if name in by_name]
+            self.providers += [p for p in by_name.values() if p.name not in order]
         if not self.providers:
             self.problem = "Add a Groq, OpenRouter, or Cloudflare key to the server .env file to enable AI."
 
@@ -280,24 +431,11 @@ class Gateway:
 
     def request(self, provider, instructions, prompt, schema=None):
         max_tokens = self.settings.ai_max_output_tokens
-        urls = {
-            "mistral": f"{self.settings.freellmapi_base_url}/chat/completions",
-            "groq": "https://api.groq.com/openai/v1/chat/completions",
-            "openrouter": "https://openrouter.ai/api/v1/chat/completions",
-            "cloudflare": f"https://api.cloudflare.com/client/v4/accounts/{self.settings.cloudflare_account_id}/ai/v1/chat/completions",
-        }
-        url = urls[provider.name]
-        headers = {"Authorization": f"Bearer {provider.key}"}
-        payload = {
-            "model": provider.model,
-            "messages": [
+        messages = [
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": prompt},
-            ],
-            "response_format": {"type": "json_object"},
-            "max_tokens": max_tokens,
-            "temperature": 0.2,
-        }
+            ]
+        response_format = {"type": "json_object"}
         if provider.name == "mistral" and schema is not None:
             strict_schema = schema.model_json_schema()
 
@@ -313,7 +451,7 @@ class Gateway:
                         require_fields(child)
 
             require_fields(strict_schema)
-            payload["response_format"] = {
+            response_format = {
                 "type": "json_schema",
                 "json_schema": {
                     "name": schema.__name__,
@@ -321,20 +459,21 @@ class Gateway:
                     "schema": strict_schema,
                 },
             }
+        extra_payload = {}
         if provider.name == "groq":
-            payload["reasoning_effort"] = "low"
+            extra_payload["reasoning_effort"] = "low"
         elif provider.name == "openrouter":
-            payload["provider"] = {
+            extra_payload["provider"] = {
                 "max_price": {"prompt": 0, "completion": 0, "request": 0},
                 "allow_fallbacks": False,
             }
-        with httpx.Client(
-            transport=self.transport,
-            timeout=httpx.Timeout(45, connect=10),
-            verify=ssl.create_default_context(),
-            follow_redirects=False,
-        ) as client:
-            return client.post(url, headers=headers, json=payload)
+        return OpenAICompatibleClient(provider, self.transport).complete(
+            messages,
+            temperature=0.2,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            extra_payload=extra_payload,
+        )
 
     def complete(self, schema, system, prompt, validate=None):
         self.require()
@@ -350,7 +489,11 @@ class Gateway:
         )
         retry = []
         invalid_output = False
+        started = self.clock()
+        attempts = 0
         for p in self.providers:
+            if attempts >= self.settings.ai_max_failover_attempts or self.clock() - started >= self.settings.ai_request_timeout_seconds:
+                break
             if check and not check(p.name):
                 continue
             with self.lock:
@@ -365,14 +508,15 @@ class Gateway:
                     )
                     continue
             try:
+                attempts += 1
                 response = self.request(p, instructions, prompt, schema)
             except httpx.HTTPError:
-                self.cooldown(p, 30)
-                retry.append(30)
+                self.cooldown(p, 60)
+                retry.append(60)
                 continue
             if response.status_code in (401, 403):
-                self.cooldown(p, 86400, disabled=True)
-                retry.append(86400)
+                self.cooldown(p, 300, disabled=True)
+                retry.append(300)
                 continue
             if response.status_code == 429 or response.status_code >= 500:
                 seconds = self.retry_seconds(response)
