@@ -1065,3 +1065,192 @@
   color: var(--text, #f1f5f9);
 }
 
+/* Phone layout: keep navigation usable and tables readable without
+   shrinking text into an unusable desktop view. */
+@media (max-width: 720px) {
+  .admin-container {
+    display: block;
+    min-height: 100dvh;
+  }
+
+  .admin-sidebar,
+  .admin-sidebar.collapsed {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    position: sticky;
+    top: 0;
+    border-right: 0;
+    border-bottom: 1px solid #1e293b;
+  }
+
+  .admin-sidebar-header {
+    height: 56px;
+    padding: 0 14px;
+  }
+
+  .admin-sidebar.collapsed .admin-nav-item span {
+    display: inline;
+  }
+
+  .admin-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+    padding: 8px;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+
+  .admin-sidebar.collapsed .admin-nav-item {
+    justify-content: flex-start;
+    padding: 10px 12px;
+  }
+
+  .admin-sidebar-footer {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 8px;
+  }
+
+  .admin-main {
+    min-height: calc(100dvh - 250px);
+  }
+
+  .admin-header {
+    height: auto;
+    min-height: 58px;
+    padding: 10px 14px;
+    gap: 10px;
+  }
+
+  .admin-header-left,
+  .admin-header-right {
+    gap: 8px;
+  }
+
+  .admin-header-left {
+    min-width: 0;
+  }
+
+  .admin-breadcrumb {
+    min-width: 0;
+    font-size: 0.8rem;
+  }
+
+  .admin-breadcrumb b {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .admin-user-btn {
+    max-width: 42px;
+    overflow: hidden;
+    padding: 4px;
+  }
+
+  .admin-user-btn span {
+    display: none;
+  }
+
+  .admin-content {
+    padding: 12px;
+    gap: 14px;
+  }
+
+  .admin-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .admin-kpi-card {
+    padding: 12px;
+    gap: 9px;
+    min-width: 0;
+  }
+
+  .admin-kpi-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .admin-kpi-info h4 {
+    font-size: 0.67rem;
+    line-height: 1.2;
+  }
+
+  .admin-kpi-info .number {
+    font-size: 1.3rem;
+  }
+
+  .admin-card {
+    padding: 12px;
+    border-radius: 10px;
+  }
+
+  .admin-card-header {
+    align-items: stretch;
+  }
+
+  .admin-card-header-actions,
+  .admin-search-bar {
+    width: 100%;
+  }
+
+  .admin-search-bar {
+    flex: 1;
+  }
+
+  .admin-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .admin-table {
+    min-width: 680px;
+  }
+
+  .admin-pagination {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .admin-pagination-btns {
+    justify-content: space-between;
+  }
+
+  .admin-drawer {
+    width: 100%;
+  }
+
+  .admin-drawer-footer {
+    flex-direction: column-reverse;
+  }
+
+  .admin-drawer-footer .admin-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 420px) {
+  .admin-nav {
+    grid-template-columns: 1fr;
+    max-height: 220px;
+  }
+
+  .admin-kpi-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .admin-kpi-card {
+    display: block;
+  }
+
+  .admin-kpi-icon {
+    margin-bottom: 6px;
+  }
+}
+

@@ -576,6 +576,30 @@ def create_app(config=None, services=None):
         except Exception:
             pass
 
+    def record_activity(owner, action, target, metadata="", request=None):
+        """Record real user actions for the admin audit feed."""
+        try:
+            claims = getattr(request.state, "account_claims", {}) if request else {}
+            email = (claims.get("email") or "").strip().casefold()
+            if not email:
+                profile = repo.get(owner, "profile", "account") or {}
+                email = profile.get("email", owner)
+            repo.put(
+                "__system_admin__",
+                "activity_logs",
+                {
+                    "id": identifier(),
+                    "uid": owner,
+                    "user": email,
+                    "action": action,
+                    "target": target,
+                    "metadata": metadata,
+                    "timestamp": now(),
+                },
+            )
+        except Exception:
+            logging.getLogger("cdmento").exception("Failed to record activity for %s", owner)
+
     def upsert_user_profile(
         uid,
         email,
@@ -1445,12 +1469,14 @@ def create_app(config=None, services=None):
         nid = data.id or identifier()
         if repo.get(owner, "notebooks", nid):
             raise HTTPException(409, "A notebook with this ID already exists.")
-        return repo.put(
+        result = repo.put(
             owner,
             "notebooks",
             {**data.model_dump(), "id": nid, "created_at": now()},
             expected=0,
         )
+        record_activity(owner, "created_notebook", result["name"], result.get("color", ""))
+        return result
 
     @app.patch("/api/v1/notebooks/{nid}")
     def rename_notebook(nid: str, data: S.NotebookInput, owner: Owner):
@@ -1518,6 +1544,7 @@ def create_app(config=None, services=None):
             },
         )
         job = service.enqueue(owner, "ingest", notebook=nid, source_id=sid)
+        record_activity(owner, "uploaded_source", name, f"{len(content)} bytes")
         return {"source": public_source(source), "job_id": job["id"]}
 
     @app.post("/api/v1/notebooks/{nid}/sources/upload-sessions", status_code=201)
@@ -1791,7 +1818,7 @@ def create_app(config=None, services=None):
     @app.post("/api/v1/notebooks/{nid}/notes", status_code=201)
     def create_note(nid: str, data: S.NoteInput, owner: Owner):
         notebook(owner, nid)
-        return repo.put(
+        result = repo.put(
             owner,
             "notes",
             {
@@ -1802,6 +1829,8 @@ def create_app(config=None, services=None):
             },
             expected=0,
         )
+        record_activity(owner, "created_note", result.get("title", "Untitled"), f"Notebook: {nid}")
+        return result
 
     @app.patch("/api/v1/notes/{note_id}")
     def update_note(note_id: str, data: S.NoteInput, owner: Owner):
@@ -2249,7 +2278,7 @@ def create_app(config=None, services=None):
                 raise HTTPException(
                     409, "Pause, finish or cancel your current session first."
                 )
-            return repo.put(
+            result = repo.put(
                 owner,
                 "focus_sessions",
                 {
@@ -2263,6 +2292,8 @@ def create_app(config=None, services=None):
                     "started_at": now(),
                 },
             )
+            record_activity(owner, "started_focus", "Focus Timer", f"{data.duration} seconds")
+            return result
 
     @app.patch("/api/v1/focus-sessions/{fid}")
     def focus_action(fid: str, data: S.FocusAction, owner: Owner):
@@ -2307,11 +2338,13 @@ def create_app(config=None, services=None):
 
     @app.post("/api/v1/tasks", status_code=201)
     def create_task(data: S.TaskInput, owner: Owner):
-        return repo.put(
+        result = repo.put(
             owner,
             "tasks",
             {"id": identifier(), **data.model_dump(), "created_at": now()},
         )
+        record_activity(owner, "created_task", result.get("text", "Task"), "")
+        return result
 
     @app.patch("/api/v1/tasks/{tid}")
     def update_task(tid: str, data: S.TaskInput, owner: Owner):
@@ -2341,7 +2374,7 @@ def create_app(config=None, services=None):
             }
             for c in data.cards
         ]
-        return repo.put(
+        result = repo.put(
             owner,
             "artifacts",
             {
@@ -2356,6 +2389,8 @@ def create_app(config=None, services=None):
             },
             expected=0,
         )
+        record_activity(owner, "created_quiz", data.title, f"{len(questions)} questions")
+        return result
 
     @app.post("/api/v1/decks/{aid}/cards", status_code=201)
     def add_card(aid: str, data: S.ManualCardInput, owner: Owner):
@@ -2543,7 +2578,30 @@ def create_app(config=None, services=None):
         except Exception:
             pass
 
-    seed_admin_data_if_empty()
+    def remove_legacy_seed_activity():
+        """Remove rows from the old demo-only admin feed without touching real events."""
+        seeded = {
+            ("lozadamarklaurence226@gmail.com", "login", "Admin Console"),
+            ("student1@cdm.edu.ph", "generated_quiz", "Database Normalization Quiz"),
+            ("student1@cdm.edu.ph", "uploaded_source", "IT204_Lecture_Notes.pdf"),
+        }
+        for item in repo.list("__system_admin__", "activity_logs"):
+            if (item.get("user"), item.get("action"), item.get("target")) in seeded:
+                repo.delete("__system_admin__", "activity_logs", item["id"])
+
+        seeded_access = {
+            ("lozadamarklaurence226@gmail.com", "127.0.0.1"),
+            ("demo@cdmento.local", "127.0.0.1"),
+            ("student1@cdm.edu.ph", "112.198.71.4"),
+            ("unknown@malicious.com", "185.220.101.5"),
+        }
+        for item in repo.list("__system_admin__", "access_logs"):
+            if (item.get("email"), item.get("ip")) in seeded_access:
+                repo.delete("__system_admin__", "access_logs", item["id"])
+
+    remove_legacy_seed_activity()
+
+    # Activity and access feeds must contain real events only. Do not seed demo rows.
 
     @app.get("/api/v1/admin/dashboard/kpis")
     def admin_dashboard_kpis(admin: AdminOwner):
