@@ -10,7 +10,7 @@
     "web": {
       "root": ".",
       "framework": "vite",
-      "installCommand": "unset npm_config_cache_dir NPM_CONFIG_CACHE_DIR npm_config_cache-dir NPM_CONFIG_CACHE-DIR; npm ci --loglevel=error --no-audit --no-fund",
+      "installCommand": "node scripts/vercel-install.mjs",
       "buildCommand": "npm run build",
       "outputDirectory": "build/web",
       "rewrites": [
