@@ -3,7 +3,12 @@ import { spawnSync } from "node:child_process";
 const env = { ...process.env };
 for (const key of Object.keys(env)) {
   const normalized = key.toLowerCase().replaceAll("-", "_");
-  if (normalized === "npm_config_cache_dir") delete env[key];
+  if (
+    normalized.startsWith("npm_config_cache") &&
+    normalized !== "npm_config_cache"
+  ) {
+    delete env[key];
+  }
 }
 const emptyConfig = process.platform === "win32" ? "NUL" : "/dev/null";
 env.NPM_CONFIG_GLOBALCONFIG = emptyConfig;
