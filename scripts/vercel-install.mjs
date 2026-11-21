@@ -1,4 +1,7 @@
 import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const env = { ...process.env };
 for (const key of Object.keys(env)) {
@@ -10,9 +13,12 @@ for (const key of Object.keys(env)) {
     delete env[key];
   }
 }
-const emptyConfig = process.platform === "win32" ? "NUL" : "/dev/null";
-env.NPM_CONFIG_GLOBALCONFIG = emptyConfig;
-delete env.NPM_CONFIG_USERCONFIG;
+const globalConfig = join(tmpdir(), "cdmento-empty-global.npmrc");
+const userConfig = join(tmpdir(), "cdmento-empty-user.npmrc");
+writeFileSync(globalConfig, "");
+writeFileSync(userConfig, "");
+env.NPM_CONFIG_GLOBALCONFIG = globalConfig;
+env.NPM_CONFIG_USERCONFIG = userConfig;
 
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const result = spawnSync(npm, ["ci", "--no-audit", "--no-fund"], {
