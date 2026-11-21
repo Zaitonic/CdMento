@@ -14,6 +14,9 @@ export default defineConfig({
   build: {
     outDir: fileURLToPath(new URL("../build/web", import.meta.url)),
     emptyOutDir: true,
+    // PDF.js and the editor stack are intentionally large vendor chunks.
+    // Keep the warning focused on accidental bundle regressions.
+    chunkSizeWarningLimit: 1500,
   },
   server: { host: "localhost", proxy: { "/api": "http://127.0.0.1:8000" } },
   preview: { host: "localhost", proxy: { "/api": "http://127.0.0.1:8000" } },

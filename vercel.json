@@ -3,6 +3,9 @@
   "git": {
     "deploymentEnabled": false
   },
+  "env": {
+    "UV_LINK_MODE": "copy"
+  },
   "services": {
     "web": {
       "root": ".",
