@@ -21,9 +21,21 @@ env.NPM_CONFIG_GLOBALCONFIG = globalConfig;
 env.NPM_CONFIG_USERCONFIG = userConfig;
 
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-const result = spawnSync(npm, ["ci", "--no-audit", "--no-fund"], {
+const result = spawnSync(
+  npm,
+  [
+    "ci",
+    "--userconfig",
+    userConfig,
+    "--globalconfig",
+    globalConfig,
+    "--no-audit",
+    "--no-fund",
+  ],
+  {
   env,
   stdio: "inherit",
   shell: process.platform === "win32",
-});
+  },
+);
 process.exit(result.status ?? 1);
