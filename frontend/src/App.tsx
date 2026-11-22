@@ -1005,7 +1005,7 @@ export default function App() {
       )}
       {modal && (
         <div className="modal-backdrop" onClick={() => setModal(null)}>
-          <div
+          <form
             className="modal"
             role="dialog"
             aria-modal="true"
@@ -1013,8 +1013,27 @@ export default function App() {
               modal.kind === "delete" ? "Delete notebook" : "Notebook details"
             }
             onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (modal.kind === "delete") {
+                const remaining = s.notebooks.filter(
+                  (n) => n.id !== modal.id,
+                );
+                s.set({
+                  notebooks: remaining,
+                  notes: s.notes.filter((n) => n.notebook !== modal.id),
+                  sources: s.sources.filter((n) => n.notebook !== modal.id),
+                  active:
+                    s.active === modal.id
+                      ? remaining[0]?.id || ""
+                      : s.active,
+                });
+                setModal(null);
+              } else saveModal();
+            }}
           >
             <button
+              type="button"
               className="modal-close icon-button"
               aria-label="Close dialog"
               onClick={() => setModal(null)}
@@ -1045,33 +1064,16 @@ export default function App() {
                 placeholder="e.g. Introduction to Psychology"
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && saveModal()}
               />
             )}
             <div className="modal-actions">
-              <button className="secondary" onClick={() => setModal(null)}>
+              <button type="button" className="secondary" onClick={() => setModal(null)}>
                 Cancel
               </button>
               <button
+                type="submit"
                 className="primary"
                 disabled={modal.kind !== "delete" && !value.trim()}
-                onClick={() => {
-                  if (modal.kind === "delete") {
-                    const remaining = s.notebooks.filter(
-                      (n) => n.id !== modal.id,
-                    );
-                    s.set({
-                      notebooks: remaining,
-                      notes: s.notes.filter((n) => n.notebook !== modal.id),
-                      sources: s.sources.filter((n) => n.notebook !== modal.id),
-                      active:
-                        s.active === modal.id
-                          ? remaining[0]?.id || ""
-                          : s.active,
-                    });
-                    setModal(null);
-                  } else saveModal();
-                }}
               >
                 {modal.kind === "delete"
                   ? "Delete notebook"
@@ -1080,7 +1082,7 @@ export default function App() {
                     : "Save notebook"}
               </button>
             </div>
-          </div>
+          </form>
         </div>
       )}
       {preview && (

@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { Sparkles, Save, FileText } from "lucide-react";
+import { Sparkles, Save, FileText, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
 import { type Source, useStore } from "../../lib/store";
@@ -37,14 +37,23 @@ export default function ReviewerPanel({
   source?: Source;
   onCitation: (citation: SourceCitation) => void;
 }) {
-  const a = useArtifacts("guide");
+  const a = useArtifacts("guide", source?.id);
   const navigate = useNavigate();
   const [coverage, setCoverage] = useState("whole");
   const [range, setRange] = useState("");
   const [style, setStyle] = useState("detailed");
   const [saving, setSaving] = useState(false);
+  const [saveOptions, setSaveOptions] = useState({
+    include_summary: true,
+    include_sections: true,
+    include_practice: true,
+    include_disclaimer: true,
+  });
   const s = useStore();
   const reviewer = a.artifact;
+  const optionCount = Object.values(saveOptions).filter(Boolean).length;
+  const toggleOption = (key: keyof typeof saveOptions) =>
+    setSaveOptions((current) => ({ ...current, [key]: !current[key] }));
   const citation = (c: SourceCitation, i: number) => (
     <button
       key={i}
@@ -122,8 +131,16 @@ export default function ReviewerPanel({
         </p>
       )}
       {a.error && (
-        <p role="alert" className="field-error">
-          {a.error}
+        <div role="alert" className="reviewer-error">
+          <span>{a.error}</span>
+          <button type="button" className="secondary" onClick={a.retry}>
+            <RotateCw size={14} /> Retry
+          </button>
+        </div>
+      )}
+      {a.loading && a.items.length === 0 && !a.busy && (
+        <p className="muted" role="status">
+          Loading saved reviewers…
         </p>
       )}
       {a.items.length > 0 && (
@@ -175,15 +192,40 @@ export default function ReviewerPanel({
               ))}
             </section>
           )}
+          <fieldset className="reviewer-save-options">
+            <legend>Save to Notes</legend>
+            {(
+              [
+                ["include_summary", "Summary"],
+                ["include_sections", "Sections"],
+                ["include_practice", "Practice questions"],
+                ["include_disclaimer", "Disclaimer"],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key}>
+                <input
+                  type="checkbox"
+                  checked={saveOptions[key]}
+                  onChange={() => toggleOption(key)}
+                />
+                {label}
+              </label>
+            ))}
+          </fieldset>
           <button
             className="secondary"
-            disabled={saving}
+            disabled={saving || optionCount === 0}
             onClick={async () => {
               setSaving(true);
               try {
-                const note = await api(`/artifacts/${reviewer.id}/save-note`, {
-                  method: "POST",
-                });
+                const note = await api(
+                  `/artifacts/${reviewer.id}/save-note`,
+                  {
+                    method: "POST",
+                    body: JSON.stringify(saveOptions),
+                  },
+                  30_000,
+                );
                 await useStore.getState().refresh();
                 toast.success("Reviewer saved to Notes.");
                 navigate(`/notes?note=${note.id}`);
@@ -197,6 +239,11 @@ export default function ReviewerPanel({
             <Save size={14} />
             {saving ? "Saving…" : "Save reviewer to Notes"}
           </button>
+          {optionCount === 0 && (
+            <small className="field-error">
+              Choose at least one part of the reviewer to save.
+            </small>
+          )}
         </article>
       ) : (
         <div className="reviewer-outline">

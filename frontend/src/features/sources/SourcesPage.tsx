@@ -42,8 +42,15 @@ export default function SourcesPage({
   const s = useStore();
   const navigate = useNavigate();
   const sources = s.sources.filter((x) => x.notebook === s.active);
+  const normalizedSources = sources.map((src) => ({
+    ...src,
+    type: src.type === "text" || src.type === "plain" ? "txt" : src.type,
+  }));
   const [selected, select] = useState("");
-  const source = sources.find((x) => x.id === selected) || sources[0];
+  const source = normalizedSources.find((x) => x.id === selected) || normalizedSources[0];
+  useEffect(() => {
+    if (source && source.id !== selected) select(source.id);
+  }, [normalizedSources, selected]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [tab, setTab] = useState("document");
@@ -112,7 +119,7 @@ export default function SourcesPage({
     }
     input.current?.click();
   };
-  async function upload(files: File[]) {
+  async function upload(files: File[], signal?: AbortSignal) {
     if (uploading || !files.length) return;
     // Recover if the remembered notebook was deleted on another device.
     let notebook = s.active;
@@ -134,9 +141,9 @@ export default function SourcesPage({
       for (const file of files) {
         if (file.size > 10 * 1024 * 1024)
           throw new Error("Files must be 10 MB or smaller.");
-        const result = await uploadSource(file, notebook);
+        const result = await uploadSource(file, notebook, signal);
         await useStore.getState().refresh();
-        if (result.job_id) await waitForJob(result.job_id);
+        if (result.job_id) await waitForJob(result.job_id, undefined, { signal });
         await useStore.getState().refresh();
         if (useStore.getState().active === notebook) select(result.source.id);
         toast.success(
@@ -147,7 +154,13 @@ export default function SourcesPage({
       }
       return true;
     } catch (e: any) {
-      toast.error(e.message);
+      if (e?.name === "AbortError" || e?.status === 499) {
+        toast.error("Upload was cancelled.");
+      } else if (e?.status === 408) {
+        toast.error("Upload timed out. Check your connection and retry.");
+      } else {
+        toast.error(e.message);
+      }
       await useStore
         .getState()
         .refresh()
@@ -160,16 +173,31 @@ export default function SourcesPage({
   }
   async function saveText() {
     if (!title.trim() || !text.trim()) return;
-    const success = await upload([
-      new File([text], `${title.trim().replace(/\.txt$/i, "")}.txt`, {
-        type: "text/plain",
-      }),
-    ]);
-    if (success) {
-      setPaste(false);
-      setTitle("");
-      setText("");
-      setTab("text");
+    const abort = new AbortController();
+    const timeout = setTimeout(() => abort.abort(), 30_000);
+    try {
+      const success = await upload(
+        [
+          new File([text], `${title.trim().replace(/\.txt$/i, "")}.txt`, {
+            type: "text/plain",
+          }),
+        ],
+        abort.signal,
+      );
+      if (success) {
+        setPaste(false);
+        setTitle("");
+        setText("");
+        setTab("text");
+      }
+    } catch (e: any) {
+      if (e?.name === "AbortError" || e?.status === 408) {
+        toast.error("Paste timed out. Try a smaller text or upload a file.");
+      } else {
+        toast.error(e?.message || "Failed to save text source.");
+      }
+    } finally {
+      clearTimeout(timeout);
     }
   }
   const sections = preview?.sections || [];
@@ -278,7 +306,7 @@ export default function SourcesPage({
             ))}
           </div>
           <div className="source-items">
-            {sources
+            {normalizedSources
               .filter(
                 (f) =>
                   (filter === "all" || f.type === filter) &&
@@ -305,7 +333,7 @@ export default function SourcesPage({
                   </span>
                 </button>
               ))}
-            {!sources.length && (
+            {!normalizedSources.length && (
               <p className="source-empty-hint">
                 Your materials will appear here after you add them.
               </p>
@@ -399,7 +427,22 @@ export default function SourcesPage({
               >
                 {source.status === "ready"
                   ? preview?.page_count
-                    ? `Text available on ${preview.page_count - (preview.unreadable_pages?.length || 0)} of ${preview.page_count} pages. ${preview.ocr_pages?.length ? `${preview.ocr_pages.length} pages read with local OCR. ` : ""}Check the original when studying.`
+                    ? (
+                      <>
+                        Text available on{" "}
+                        {preview.page_count -
+                          (preview.unreadable_pages?.length || 0)} of{" "}
+                        {preview.page_count} pages.
+                        {preview.ocr_pages?.length && (
+                          <>
+                            {" "}
+                            {preview.ocr_pages.length} pages read with local OCR.
+                          </>
+                        )}
+                        {" "}
+                        Check the original when studying.
+                      </>
+                    )
                     : "Text extracted · check the original when studying."
                   : source.status === "ocr"
                     ? `Reading scanned pages locally · page ${source.processing_page || "…"} of ${source.page_count || "…"}…`
@@ -608,8 +651,11 @@ export default function SourcesPage({
               type="button"
               className="modal-close icon-button"
               aria-label="Close paste text"
-              disabled={uploading}
-              onClick={() => setPaste(false)}
+              onClick={() => {
+                setPaste(false);
+                setTitle("");
+                setText("");
+              }}
             >
               <X />
             </button>
@@ -642,8 +688,11 @@ export default function SourcesPage({
               <button
                 type="button"
                 className="secondary"
-                disabled={uploading}
-                onClick={() => setPaste(false)}
+                onClick={() => {
+                  setPaste(false);
+                  setTitle("");
+                  setText("");
+                }}
               >
                 Cancel
               </button>

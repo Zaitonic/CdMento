@@ -71,12 +71,26 @@ it("saves pasted material through the existing document ingestion pipeline", asy
     "Variables store values.",
   );
   await user.click(screen.getByRole("button", { name: "Save text source" }));
-  await waitFor(() => expect(waitForJob).toHaveBeenCalledWith("job-test"));
+  await waitFor(() =>
+    expect(waitForJob).toHaveBeenCalledWith(
+      "job-test",
+      undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ),
+  );
   const [path, request] = vi
     .mocked(api)
     .mock.calls.find(([path]) => path.endsWith("/parts/0"))!;
   expect(path).toBe("/notebooks/notebook-test/sources/upload-sessions/upload-test/parts/0");
-  expect(api).toHaveBeenCalledWith("/notebooks/notebook-test/sources/upload-sessions", expect.objectContaining({body: JSON.stringify({name: "JavaScript basics.txt", size: 23})}));
+  expect(api).toHaveBeenCalledWith(
+    "/notebooks/notebook-test/sources/upload-sessions",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ name: "JavaScript basics.txt", size: 23 }),
+      signal: expect.any(AbortSignal),
+    }),
+    30000,
+  );
   const file = (request?.body as FormData).get("file") as File;
   expect(file.size).toBe(23);
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

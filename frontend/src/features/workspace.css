@@ -8,6 +8,11 @@
 .feature-screen {
   --feature-accent: var(--primary);
 }
+.assistant-screen {
+  min-height: calc(100dvh - 80px);
+  display: flex;
+  flex-direction: column;
+}
 .feature-heading {
   display: flex;
   align-items: center;
@@ -603,17 +608,39 @@ main[data-feature="sources"] {
   padding: 30px 16px;
   border-left: 1px solid var(--border);
   background: var(--sidebar);
+  max-height: 520px;
+  overflow-y: auto;
 }
 .note-outline > .eyebrow {
   font-size: 9px;
   letter-spacing: 1.2px;
 }
-.note-outline p {
+.note-outline .outline-item {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+  padding: 4px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note-outline .outline-item.h1 {
+  font-weight: 700;
+  color: var(--text);
+}
+.note-outline .outline-item.h2 {
+  padding-left: 12px;
+}
+.note-outline .outline-item.h3 {
+  padding-left: 24px;
+  font-size: 10px;
+}
+.note-outline .empty-outline {
   font-size: 11px;
   color: var(--muted);
   line-height: 1.7;
   margin-top: 16px;
-  overflow-wrap: anywhere;
+  font-style: italic;
 }
 /* Flashcards: focused practice stage */
 .flashcards-screen {
@@ -802,7 +829,8 @@ main[data-feature="mindmaps"] {
 .assistant-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 250px;
-  min-height: 620px;
+  flex: 1;
+  min-height: 0;
   border: 1px solid var(--border);
   border-radius: 20px;
   background: var(--surface);
@@ -816,6 +844,7 @@ main[data-feature="mindmaps"] {
   flex-direction: column;
   padding: 25px;
   min-width: 0;
+  min-height: 0;
 }
 .assistant-center {
   display: flex;
@@ -1813,11 +1842,78 @@ main[data-feature="mindmaps"] {
   line-height: 1.7;
   font-weight: 600;
 }
+.reviewer-save-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 20px 0;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.reviewer-save-options legend {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 8px;
+  width: 100%;
+}
+.reviewer-save-options label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text);
+  margin: 0;
+}
+.reviewer-save-options input {
+  width: auto;
+  accent-color: var(--primary);
+}
+.reviewer-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px;
+  background: #fef3f3;
+  border: 1px solid #fad1d1;
+  border-radius: 8px;
+  color: #bd5565;
+  font-size: 11px;
+  margin-bottom: 14px;
+}
+[data-theme="dark"] .reviewer-error {
+  background: #3a252a;
+  border-color: #6b3a40;
+  color: #e8a5ab;
+}
+.reviewer-error button {
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.reviewer-result {
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+.reviewer-panel {
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+  padding-bottom: 40px;
+  min-height: 0;
+}
 .live-chat-history {
   flex: 1;
   overflow-y: auto;
-  max-height: 650px;
-  min-height: 350px;
+  max-height: none;
+  min-height: 0;
   padding: 5px;
 }
 .live-chat-history .message {

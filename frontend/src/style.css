@@ -113,10 +113,16 @@ header {
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   gap: 20px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex-shrink: 0;
 }
 .app {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 .sidebar {
   width: 241px;
@@ -332,6 +338,9 @@ header {
 .shell {
   width: calc(100% - 241px);
   margin-left: 241px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 .header-left,
 .header-right {
@@ -418,12 +427,16 @@ header {
   display: flex;
   max-width: 1700px;
   margin: auto;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
 }
 main {
   padding: 39px 38px 0;
   flex: 1;
   min-width: 0;
   position: relative;
+  overflow: auto;
 }
 .page-eyebrow {
   display: flex;
@@ -1680,6 +1693,20 @@ progress {
 [data-theme="dark"] .timer-card {
   background: #282336;
   border-color: #3a304b;
+}
+[data-theme="dark"] .quiet-card {
+  background: #242333;
+  border-color: #3a304b;
+  color: #c0aed8;
+}
+[data-theme="dark"] .quiet-card p {
+  color: #b0a0c8;
+}
+[data-theme="dark"] .quiet-hills {
+  background: #3a304b;
+}
+[data-theme="dark"] .quiet-hills:after {
+  background: #403555;
 }
 [data-theme="dark"] .tool-card {
   background: #282436;

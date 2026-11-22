@@ -216,24 +216,6 @@ class PasswordAuth:
         self._throttle(("reset", client), 5, 600, "Too many requests. Please wait ten minutes.")
         email = email.strip().casefold()
         account = self.repo.get(AUTH_OWNER, "accounts", self.email_id(email))
-        if not account and self._google_account_exists(email):
-            google_acc = next(
-                (item for item in self.repo.list(GOOGLE_AUTH_OWNER, "accounts") if item.get("email", "").casefold() == email),
-                None,
-            )
-            account_id = self.email_id(email)
-            salt = secrets.token_hex(16)
-            account = {
-                "id": account_id,
-                "uid": "email_" + account_id,
-                "email": email,
-                "display_name": (google_acc.get("display_name") if google_acc else email.split("@")[0]) or email.split("@")[0],
-                "email_verified": True,
-                "salt": salt,
-                "password_hash": "",
-                "alg": "bcrypt",
-            }
-            self.repo.put(AUTH_OWNER, "accounts", account)
 
         if account:
             # Send to unverified accounts too: a link delivered to the mailbox is

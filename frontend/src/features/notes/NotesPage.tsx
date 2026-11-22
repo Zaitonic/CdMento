@@ -4,6 +4,32 @@ import { Plus, NotebookPen, Trash2, Check, BookOpen } from "lucide-react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useStore } from "../../lib/store";
+
+type OutlineHeading = { level: number; text: string };
+
+function extractHeadings(json: any): OutlineHeading[] {
+  if (!json || json.type !== "doc") return [];
+  const headings: OutlineHeading[] = [];
+  function walk(node: any) {
+    if (
+      node.type === "heading" &&
+      Number.isInteger(node.attrs?.level) &&
+      node.attrs.level >= 1 &&
+      node.attrs.level <= 3
+    ) {
+      const text = node.content
+        ?.filter((child: any) => child.type === "text")
+        .map((child: any) => child.text)
+        .join("")
+        .trim();
+      if (text) headings.push({ level: node.attrs.level, text });
+    }
+    node.content?.forEach(walk);
+  }
+  walk(json);
+  return headings;
+}
+
 function PageTitle({ title, desc }: { title: string; desc: string }) {
   return (
     <div className="page-title">
@@ -150,14 +176,13 @@ export default function Notes() {
               </div>
               <aside className="note-outline">
                 <span className="eyebrow">ON THIS PAGE</span>
-                {(
-                  editor?.getText().split("\n").filter(Boolean).slice(0, 8) ||
-                  []
-                ).map((line, i) => (
-                  <p key={i}>{line.slice(0, 65)}</p>
+                {extractHeadings(editor?.getJSON()).map((h, i) => (
+                  <div key={i} className={`outline-item h${h.level}`}>
+                    {h.text}
+                  </div>
                 ))}
-                {!editor?.getText() && (
-                  <p>Add headings and ideas to shape your note.</p>
+                {!extractHeadings(editor?.getJSON()).length && (
+                  <p className="empty-outline">Add headings (H2) to build an outline.</p>
                 )}
               </aside>
             </div>

@@ -412,6 +412,28 @@ class ReviewerBatch(Input):
     warnings: list[str] = Field(default_factory=list, max_length=10)
 
 
+class ReviewerNoteOptions(Input):
+    """Choose which parts of a reviewer are copied into a note."""
+
+    include_summary: bool = True
+    include_sections: bool = True
+    include_practice: bool = True
+    include_disclaimer: bool = True
+
+    @model_validator(mode="after")
+    def keep_at_least_one_section(self):
+        if not any(
+            (
+                self.include_summary,
+                self.include_sections,
+                self.include_practice,
+                self.include_disclaimer,
+            )
+        ):
+            raise ValueError("Choose at least one part of the reviewer to save.")
+        return self
+
+
 class SearchBriefInput(Input):
     query: str = Field(min_length=2, max_length=200)
     sources: list[str] = Field(default_factory=list, max_length=6)

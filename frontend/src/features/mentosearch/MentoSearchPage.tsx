@@ -106,7 +106,7 @@ export default function MentoSearchPage() {
     setPapersError('');
     setFailedSources([]);
     try {
-      const outcome = await runMentoSearch(q, sourcePreferences, controller.signal);
+      const outcome = await runMentoSearch(q, sourcePreferences, controller.signal, 30_000);
       if (controller.signal.aborted) return;
       setPapers(outcome.results);
       setFailedSources(outcome.failedSources);
@@ -157,6 +157,7 @@ export default function MentoSearchPage() {
         [...sourcePreferences],
         prefs.sort,
         controller.signal,
+        25_000,
       );
       if (controller.signal.aborted) return;
       setBrief(data);
@@ -236,6 +237,13 @@ export default function MentoSearchPage() {
       return (
         <div className="empty-state error" role="alert">
           <p>{briefError}</p>
+          <button
+            type="button"
+            className="secondary"
+            onClick={handleSubmit}
+          >
+            Retry search
+          </button>
         </div>
       );
     }
@@ -434,6 +442,13 @@ export default function MentoSearchPage() {
       return (
         <div className="empty-state error" role="alert">
           <p>{papersError}</p>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void loadPapers(lastQuery)}
+          >
+            Retry search
+          </button>
         </div>
       );
     }
@@ -441,6 +456,13 @@ export default function MentoSearchPage() {
       return (
         <div className="empty-state">
           <p>Open this tab to load the full paper list.</p>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void loadPapers(lastQuery)}
+          >
+            Load papers
+          </button>
         </div>
       );
     }

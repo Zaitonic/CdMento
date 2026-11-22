@@ -115,7 +115,7 @@ export default function Root() {
             <Route path="/auth/action" element={<ActionPage />} />
             <Route path="*" element={<ProtectedWorkspace />} />
           </Routes>
-          <Toaster richColors position="bottom-right" />
+          <Toaster richColors position="top-right" offset="88px" />
         </SessionProvider>
       </PublicThemeProvider>
     </MotionConfig>

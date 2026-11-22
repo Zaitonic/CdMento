@@ -64,36 +64,126 @@ export function Evidence({ ids }: { ids: string[] }) {
   );
 }
 
-export function useArtifacts(kind: string) {
+type ArtifactCache = {
+  items: any[];
+  activeBySource: Record<string, string>;
+};
+
+const artifactCache = new Map<string, ArtifactCache>();
+
+function reviewerStorageKey(key: string) {
+  return `cdmento-reviewer:${key}`;
+}
+
+function readRememberedReviewer(key: string) {
+  try {
+    return localStorage.getItem(reviewerStorageKey(key)) || "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberReviewer(key: string, id: string) {
+  try {
+    if (id) localStorage.setItem(reviewerStorageKey(key), id);
+    else localStorage.removeItem(reviewerStorageKey(key));
+  } catch {
+    // The cache still works for this session when storage is unavailable.
+  }
+}
+
+export function useArtifacts(kind: string, sourceId?: string) {
   const ai = useAI();
   const [topic, setTopic] = useState("");
   const [count, setCount] = useState(8);
   const [difficulty, setDifficulty] = useState("medium");
   const [progress, setProgress] = useState("");
   const notebook = useStore((s) => s.active);
-  const [items, setItems] = useState<any[]>([]);
-  const [active, setActive] = useState("");
+  const owner = useStore((s) => s.owner);
+  const cacheKey = `${owner}:${notebook}:${kind}`;
+  const activeKey = sourceId ? `${cacheKey}:source:${sourceId}` : cacheKey;
+  const cached = artifactCache.get(cacheKey);
+  const [items, setItems] = useState<any[]>(cached?.items || []);
+  const [active, setActiveState] = useState(
+    () => readRememberedReviewer(activeKey) || "",
+  );
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const mounted = useRef(true);
+  const lastRequest = useRef<Record<string, unknown>>({});
+  const hasGenerated = useRef(false);
+  const visibleItems = sourceId
+    ? items.filter(
+        (item) =>
+          Array.isArray(item.source_ids) && item.source_ids.includes(sourceId),
+      )
+    : items;
+
+  const setActive = (id: string) => {
+    setActiveState(id);
+    const entry = artifactCache.get(cacheKey) || {
+      items: [],
+      activeBySource: {},
+    };
+    entry.activeBySource[activeKey] = id;
+    artifactCache.set(cacheKey, entry);
+    rememberReviewer(activeKey, id);
+  };
+
   const reload = async () => {
-    if (!notebook) return;
-    const result = await api(`/notebooks/${notebook}/artifacts?kind=${kind}`);
-    if (mounted.current) {
-      setItems(result);
-      setActive((old) =>
-        result.some((a: any) => a.id === old) ? old : result.at(-1)?.id || "",
+    if (!notebook) {
+      setItems([]);
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const result = await api(
+        `/notebooks/${notebook}/artifacts?kind=${kind}`,
+        {},
+        15_000,
       );
+      if (!mounted.current) return;
+      setItems(result);
+      const entry = artifactCache.get(cacheKey) || {
+        items: [],
+        activeBySource: {},
+      };
+      entry.items = result;
+      artifactCache.set(cacheKey, entry);
+    } catch (e: any) {
+      if (!mounted.current) return;
+      if (e?.status === 404) {
+        // A deleted or stale notebook is a workspace-sync issue, not a
+        // reviewer failure. Refresh instead of showing a scary panel error.
+        await useStore
+          .getState()
+          .refresh()
+          .catch(() => {});
+      } else {
+        setError(e?.message || "Could not load your saved study material.");
+      }
+    } finally {
+      if (mounted.current) setLoading(false);
     }
   };
+
   useEffect(() => {
     mounted.current = true;
-    setItems([]);
-    setActive("");
+    const entry = artifactCache.get(cacheKey);
+    setItems(entry?.items || []);
     setError("");
-    if (!notebook) return;
-    reload().catch((e) => setError(e.message));
-    api(`/notebooks/${notebook}/jobs`)
+    setBusy(false);
+    if (!notebook) {
+      setLoading(false);
+      return;
+    }
+    setLoading(!entry?.items.length);
+    reload().catch((e) => {
+      if (mounted.current) setError(e.message);
+    });
+    api(`/notebooks/${notebook}/jobs`, {}, 15_000)
       .then(async (jobs) => {
         const job = jobs.find(
           (j: any) =>
@@ -117,36 +207,56 @@ export function useArtifacts(kind: string) {
     return () => {
       mounted.current = false;
     };
-  }, [notebook, kind]);
+  }, [notebook, kind, owner]);
+
+  useEffect(() => {
+    setActiveState((current) => {
+      if (visibleItems.some((item) => item.id === current)) return current;
+      const remembered = readRememberedReviewer(activeKey);
+      if (visibleItems.some((item) => item.id === remembered)) return remembered;
+      return visibleItems.at(-1)?.id || "";
+    });
+  }, [items, sourceId, activeKey]);
+
   const generate = async (extra: Record<string, unknown> = {}) => {
-    if (busy || !ai.ready) return;
+    if (busy || !ai.ready || !notebook) return;
+    lastRequest.current = extra;
+    hasGenerated.current = true;
     setBusy(true);
     setError("");
     setProgress("Preparing your material…");
     try {
       await useStore.getState().flush();
-      const response = await api(`/notebooks/${notebook}/generations`, {
-        method: "POST",
-        body: json({
-          kind,
-          topic,
-          count,
-          difficulty,
-          source_ids: useStore.getState().selectedSources,
-          ...extra,
-        }),
-      });
+      const response = await api(
+        `/notebooks/${notebook}/generations`,
+        {
+          method: "POST",
+          body: json({
+            kind,
+            topic,
+            count,
+            difficulty,
+            source_ids: useStore.getState().selectedSources,
+            ...extra,
+          }),
+        },
+        30_000,
+      );
       if (response.job_id)
-        await waitForJob(response.job_id, (job) => {
-          if (mounted.current)
-            setProgress(
-              job.status === "waiting"
-                ? `${job.error || "AI temporarily unavailable."} Retrying automatically after ${new Date(job.retry_at * 1000).toLocaleTimeString()}`
-                : job.progress
-                  ? `Processed ${job.progress} document parts…`
-                  : "Creating your study material…",
-            );
-        });
+        await waitForJob(
+          response.job_id,
+          (job) => {
+            if (mounted.current)
+              setProgress(
+                job.status === "waiting"
+                  ? `${job.error || "AI temporarily unavailable."} Retrying automatically after ${new Date(job.retry_at * 1000).toLocaleTimeString()}`
+                  : job.progress
+                    ? `Processed ${job.progress} document parts…`
+                    : "Creating your study material…",
+              );
+          },
+          { timeoutMs: 6 * 60 * 1000 },
+        );
       if (mounted.current) {
         await reload();
         setActive(response.artifact_id);
@@ -154,12 +264,22 @@ export function useArtifacts(kind: string) {
       }
       return response.artifact_id as string;
     } catch (e: any) {
-      if (mounted.current) setError(e.message);
+      if (mounted.current) {
+        setProgress("");
+        if (e?.status !== 499 && e?.name !== "AbortError")
+          setError(e?.message || "Generation failed. Retry when ready.");
+      }
       return undefined;
     } finally {
       if (mounted.current) setBusy(false);
     }
   };
+
+  const retry = () => {
+    if (hasGenerated.current) return generate(lastRequest.current);
+    return reload();
+  };
+
   const controls = (
     <>
       <AIAccess ai={ai} />
@@ -212,10 +332,11 @@ export function useArtifacts(kind: string) {
       )}
       {error && (
         <div className="connection-banner" role="alert">
-          {error}
+          <span>{error}</span>
+          <button onClick={retry}>Retry</button>
         </div>
       )}
-      {items.length > 0 && (
+      {visibleItems.length > 0 && (
         <label className="artifact-picker">
           Saved{" "}
           {kind === "quiz"
@@ -228,7 +349,7 @@ export function useArtifacts(kind: string) {
             value={active}
             onChange={(e) => setActive(e.target.value)}
           >
-            {items.map((a, i) => (
+            {visibleItems.map((a, i) => (
               <option key={a.id} value={a.id}>
                 {new Date(a.created_at).toLocaleDateString()} · Set {i + 1}
               </option>
@@ -243,12 +364,15 @@ export function useArtifacts(kind: string) {
     generate,
     error,
     progress,
-    items,
+    items: visibleItems,
     active,
     setActive,
-    artifact: items.find((a) => a.id === active),
+    artifact: visibleItems.find((a) => a.id === active),
     reload,
+    retry,
+    retryLoad: reload,
     controls,
     busy,
+    loading,
   };
 }

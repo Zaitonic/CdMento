@@ -1479,16 +1479,19 @@ def create_app(config=None, services=None):
         return result
 
     @app.patch("/api/v1/notebooks/{nid}")
-    def rename_notebook(nid: str, data: S.NotebookInput, owner: Owner):
+    def rename_notebook(nid: str, data: S.NotebookInput, owner: Owner, request: Request):
         current = notebook(owner, nid)
-        return repo.put(
+        result = repo.put(
             owner, "notebooks", {**current, "name": data.name, "color": data.color}
         )
+        record_activity(owner, "renamed_notebook", data.name, f"Notebook: {nid}", request)
+        return result
 
     @app.delete("/api/v1/notebooks/{nid}", status_code=202)
-    def remove_notebook(nid: str, owner: Owner):
+    def remove_notebook(nid: str, owner: Owner, request: Request):
         current = notebook(owner, nid)
         repo.put(owner, "notebooks", {**current, "deleting": True})
+        record_activity(owner, "deleted_notebook", current.get("name", nid), f"Notebook: {nid}", request)
         return service.enqueue(owner, "delete_notebook", notebook=nid)
 
     @app.post("/api/v1/notebooks/{nid}/sources", status_code=202)
@@ -1733,17 +1736,22 @@ def create_app(config=None, services=None):
         }
 
     @app.patch("/api/v1/sources/{sid}")
-    def rename_source(sid: str, data: S.Rename, owner: Owner):
+    def rename_source(sid: str, data: S.Rename, owner: Owner, request: Request):
         source = owned(owner, "sources", sid)
-        return public_source(repo.put(owner, "sources", {**source, "name": data.name}))
+        result = public_source(repo.put(owner, "sources", {**source, "name": data.name}))
+        record_activity(owner, "renamed_source", data.name, f"Source: {sid}", request)
+        return result
 
     @app.delete("/api/v1/sources/{sid}", status_code=204)
-    def remove_source(sid: str, owner: Owner):
-        service.delete_source(owner, owned(owner, "sources", sid))
+    def remove_source(sid: str, owner: Owner, request: Request):
+        source = owned(owner, "sources", sid)
+        name = source.get("name", sid)
+        service.delete_source(owner, source)
+        record_activity(owner, "deleted_source", name, f"Source: {sid}", request)
         return Response(status_code=204)
 
     @app.post("/api/v1/sources/{sid}/reprocess", status_code=202)
-    def reprocess_source(sid: str, owner: Owner):
+    def reprocess_source(sid: str, owner: Owner, request: Request):
         source = owned(owner, "sources", sid)
         if not source.get("storage_key"):
             raise HTTPException(
@@ -1765,10 +1773,11 @@ def create_app(config=None, services=None):
         job = service.enqueue(
             owner, "ingest", notebook=source["notebook"], source_id=sid
         )
+        record_activity(owner, "reprocessed_source", source.get("name", sid), f"Source: {sid}", request)
         return {"job_id": job["id"]}
 
     @app.post("/api/v1/sources/{sid}/retry", status_code=202)
-    def retry_source(sid: str, owner: Owner):
+    def retry_source(sid: str, owner: Owner, request: Request):
         source = owned(owner, "sources", sid)
         if source["status"] not in ("failed", "needs_ocr") or not source.get(
             "storage_key"
@@ -1777,9 +1786,11 @@ def create_app(config=None, services=None):
                 409, "This source cannot be retried in its current state."
             )
         repo.put(owner, "sources", {**source, "status": "queued", "error": None})
-        return service.enqueue(
+        job = service.enqueue(
             owner, "ingest", notebook=source["notebook"], source_id=sid
         )
+        record_activity(owner, "retried_source", source.get("name", sid), f"Source: {sid}", request)
+        return {"job_id": job["id"]}
 
     @app.get("/api/v1/jobs/{jid}")
     def job(jid: str, owner: Owner):
@@ -1833,12 +1844,12 @@ def create_app(config=None, services=None):
         return result
 
     @app.patch("/api/v1/notes/{note_id}")
-    def update_note(note_id: str, data: S.NoteInput, owner: Owner):
+    def update_note(note_id: str, data: S.NoteInput, owner: Owner, request: Request):
         current = owned(owner, "notes", note_id)
         notebook(owner, current["notebook"])
         if data.revision is None:
             raise HTTPException(422, "Include the note revision when saving.")
-        return repo.put(
+        result = repo.put(
             owner,
             "notes",
             {
@@ -1848,11 +1859,15 @@ def create_app(config=None, services=None):
             },
             expected=data.revision,
         )
+        record_activity(owner, "updated_note", result.get("title", "Untitled"), f"Note: {note_id}", request)
+        return result
 
     @app.delete("/api/v1/notes/{note_id}", status_code=204)
-    def delete_note(note_id: str, owner: Owner):
-        owned(owner, "notes", note_id)
+    def delete_note(note_id: str, owner: Owner, request: Request):
+        current = owned(owner, "notes", note_id)
+        title = current.get("title", "Untitled")
         repo.delete(owner, "notes", note_id)
+        record_activity(owner, "deleted_note", title, f"Note: {note_id}", request)
         return Response(status_code=204)
 
     @app.get("/api/v1/notebooks/{nid}/conversation")
@@ -2015,55 +2030,206 @@ def create_app(config=None, services=None):
         return {"job_id": job["id"], "artifact_id": artifact_id}
 
     @app.post("/api/v1/artifacts/{aid}/save-note", status_code=201)
-    def save_reviewer_note(aid: str, owner: Owner):
+    def save_reviewer_note(
+        aid: str,
+        request: Request,
+        owner: Owner,
+        options: S.ReviewerNoteOptions | None = None,
+    ):
         artifact = owned(owner, "artifacts", aid)
         if artifact["kind"] != "guide":
             raise HTTPException(400, "Choose a saved reviewer.")
-        for note in repo.list(owner, "notes"):
-            if note.get("reviewer_id") == aid:
-                return note
-        paragraphs = [artifact.get("overview", "")]
-        for section in artifact.get("sections", []):
-            paragraphs.extend([section["heading"], section["content"]])
-            paragraphs.extend(
-                f"Source {c['source_id']} · "
-                + (
-                    f"page {c['page']}"
-                    if c.get("page")
-                    else f"section {c.get('section', 1)}"
-                )
-                + f": {c['quote']}"
-                for c in section["citations"]
-            )
-        for question in artifact.get("practice_questions", []):
-            paragraphs.extend([question["question"], question["answer"]])
-        paragraphs.extend(artifact.get("warnings", []))
-        document = {
-            "type": "doc",
-            "content": [
-                {"type": "paragraph", "content": [{"type": "text", "text": text}]}
-                for text in paragraphs
-                if text
-            ],
+        options = options or S.ReviewerNoteOptions()
+        source_names = {
+            source["id"]: source.get("name") or "Source"
+            for source in repo.list(owner, "sources")
         }
+
+        def text_node(text, bold=False, italic=False):
+            node = {"type": "text", "text": str(text)}
+            marks = []
+            if bold:
+                marks.append({"type": "bold"})
+            if italic:
+                marks.append({"type": "italic"})
+            if marks:
+                node["marks"] = marks
+            return node
+
+        def paragraph(*nodes):
+            content = [node for node in nodes if node]
+            return {
+                "type": "paragraph",
+                "content": content or [text_node("")],
+            }
+
+        def heading(text, level=2):
+            return {
+                "type": "heading",
+                "attrs": {"level": level},
+                "content": [text_node(text)],
+            }
+
+        def bullet_list(items):
+            return {
+                "type": "bullet_list",
+                "content": [
+                    {"type": "list_item", "content": [paragraph(item)]}
+                    for item in items
+                    if item
+                ],
+            }
+
+        def text_blocks(text):
+            """Preserve paragraph breaks and simple bullet/numbered lists."""
+            blocks = []
+            for chunk in (text or "").strip().split("\n\n"):
+                lines = [line.strip() for line in chunk.splitlines() if line.strip()]
+                if not lines:
+                    continue
+                markers = ("- ", "* ", "• ", "· ")
+
+                def numbered_parts(line):
+                    head, sep, rest = line.partition(" ")
+                    if sep and head.rstrip(".)").isdigit():
+                        return rest.strip()
+                    return None
+
+                numbered = [numbered_parts(line) for line in lines]
+                if all(line.startswith(markers) for line in lines):
+                    blocks.append(
+                        bullet_list([line[2:].strip() for line in lines])
+                    )
+                elif all(part is not None for part in numbered):
+                    blocks.append(bullet_list(numbered))
+                else:
+                    blocks.append(paragraph(text_node(" ".join(lines))))
+            return blocks
+
+        def citation_line(citation):
+            name = source_names.get(citation.get("source_id")) or "Source"
+            if citation.get("page"):
+                location = f"page {citation['page']}"
+            elif citation.get("section"):
+                location = f"section {citation['section']}"
+            else:
+                location = ""
+            quote = citation.get("quote", "").strip()
+            suffix = f", {location}" if location else ""
+            return f"“{quote}” — {name}{suffix}"
+
+        document_content = []
+        plain_lines = []
+
+        if options.include_summary:
+            overview = (artifact.get("overview") or "").strip()
+            if overview:
+                document_content.append(heading("Summary"))
+                document_content.extend(text_blocks(overview))
+                plain_lines.extend(["Summary", overview])
+
+        if options.include_sections:
+            for section in artifact.get("sections", []):
+                title = section.get("heading") or "Study section"
+                document_content.append(heading(title))
+                document_content.extend(text_blocks(section.get("content", "")))
+                citations = [
+                    citation_line(c) for c in section.get("citations", [])
+                ]
+                if citations:
+                    document_content.append(bullet_list(citations))
+                plain_lines.extend([title, section.get("content", ""), *citations])
+
+        if options.include_practice:
+            questions = artifact.get("practice_questions", [])
+            if questions:
+                document_content.append(heading("Practice questions"))
+                plain_lines.append("Practice questions")
+                for index, question in enumerate(questions, start=1):
+                    document_content.append(
+                        paragraph(
+                            text_node(f"Q{index}. {question.get('question', '')}", bold=True)
+                        )
+                    )
+                    document_content.append(
+                        paragraph(
+                            text_node("Answer: ", bold=True),
+                            text_node(question.get("answer", "")),
+                        )
+                    )
+                    citations = [
+                        citation_line(c) for c in question.get("citations", [])
+                    ]
+                    if citations:
+                        document_content.append(bullet_list(citations))
+                    plain_lines.extend(
+                        [
+                            f"Q{index}. {question.get('question', '')}",
+                            f"Answer: {question.get('answer', '')}",
+                            *citations,
+                        ]
+                    )
+
+        if options.include_disclaimer:
+            disclaimer = (
+                "AI-generated study material can make mistakes. "
+                "Compare every explanation and citation with the original sources."
+            )
+            document_content.append(heading("Disclaimer"))
+            document_content.append(
+                paragraph(text_node(disclaimer, italic=True))
+            )
+            plain_lines.extend(["Disclaimer", disclaimer])
+
+        if not document_content:
+            raise HTTPException(
+                400, "Choose at least one part of the reviewer to save."
+            )
+
+        document = {"type": "doc", "content": document_content}
         if len(json.dumps(document)) > 200000:
             raise HTTPException(
                 400,
                 "This reviewer is too large for one note. Keep it in Sources or copy individual sections.",
             )
-        return repo.put(
-            owner,
-            "notes",
-            {
-                "id": identifier(),
-                "notebook": artifact["notebook"],
-                "title": artifact.get("title", "Study reviewer"),
-                "content": "",
-                "document": document,
-                "reviewer_id": aid,
-                "updated_at": now(),
-            },
+
+        title = artifact.get("title") or "Study reviewer"
+        payload = {
+            "title": title,
+            "content": "\n\n".join(line for line in plain_lines if line).strip(),
+            "document": document,
+            "reviewer_id": aid,
+            "reviewer_options": options.model_dump(),
+            "updated_at": now(),
+        }
+        existing = next(
+            (n for n in repo.list(owner, "notes") if n.get("reviewer_id") == aid),
+            None,
         )
+        if existing:
+            result = repo.put(
+                owner,
+                "notes",
+                {
+                    **existing,
+                    **payload,
+                },
+                expected=existing.get("revision", 0),
+            )
+            record_activity(owner, "updated_note", title, f"Reviewer: {aid}", request)
+        else:
+            result = repo.put(
+                owner,
+                "notes",
+                {
+                    "id": identifier(),
+                    "notebook": artifact["notebook"],
+                    **payload,
+                },
+                expected=0,
+            )
+            record_activity(owner, "created_note", title, f"Reviewer: {aid}", request)
+        return result
 
     @app.get("/api/v1/notebooks/{nid}/artifacts")
     def artifacts(nid: str, owner: Owner, kind: str = ""):

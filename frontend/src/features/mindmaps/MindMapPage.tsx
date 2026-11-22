@@ -211,6 +211,8 @@ export default function MindMap() {
           }}
           onNodeClick={(_, node) => setSelected(node.id)}
           fitView
+          maxZoom={2}
+          fitViewOptions={{ maxZoom: 1.35, padding: 0.2 }}
         >
           <Background color="#bfb6d0" gap={24} />
           <Controls />

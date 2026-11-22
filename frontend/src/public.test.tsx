@@ -135,7 +135,7 @@ describe("public site and authentication", () => {
     );
     await user.click(screen.getByRole("button", { name: "Create my account" }));
     expect(screen.getByText("Use at least 8 characters.")).toBeTruthy();
-    expect(screen.getByText("Your passwords don’t match.")).toBeTruthy();
+    expect(screen.getByText(/Your passwords don't match/)).toBeTruthy();
   });
   it("supports showing the password", async () => {
     const user = userEvent.setup();

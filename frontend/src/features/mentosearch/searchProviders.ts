@@ -27,7 +27,7 @@ export interface SourceConfig {
   name: string;
   description: string;
   defaultEnabled: boolean;
-  search: (query: string, signal: AbortSignal) => Promise<MentoResult[]>;
+  search: (query: string, signal: AbortSignal, timeoutMs?: number) => Promise<MentoResult[]>;
 }
 
 const clean = (value: string | undefined | null): string =>
@@ -41,10 +41,18 @@ function stripTags(value: string): string {
 async function searchSemanticScholar(
   query: string,
   signal: AbortSignal,
+  timeoutMs?: number,
 ): Promise<MentoResult[]> {
   const url =
     "/api/v1/search/semantic?query=" + encodeURIComponent(query);
-  const response = await fetch(url, { signal, headers: authHeaders() });
+  const timeout = timeoutMs ? new AbortController() : null;
+  const timer = timeout ? setTimeout(() => timeout.abort(), timeoutMs) : null;
+  const combinedSignal = timeout
+    ? signal
+      ? AbortSignal.any([signal, timeout.signal])
+      : timeout.signal
+    : signal;
+  const response = await fetch(url, { signal: combinedSignal, headers: authHeaders() });
   if (!response.ok) throw new Error(`Semantic Scholar responded ${response.status}`);
   const data = await response.json();
   const items: any[] = data?.data || [];
@@ -74,9 +82,17 @@ async function searchSemanticScholar(
 async function searchArxiv(
   query: string,
   signal: AbortSignal,
+  timeoutMs?: number,
 ): Promise<MentoResult[]> {
   const url = "/api/v1/search/arxiv?query=" + encodeURIComponent(query);
-  const response = await fetch(url, { signal, headers: authHeaders() });
+  const timeout = timeoutMs ? new AbortController() : null;
+  const timer = timeout ? setTimeout(() => timeout.abort(), timeoutMs) : null;
+  const combinedSignal = timeout
+    ? signal
+      ? AbortSignal.any([signal, timeout.signal])
+      : timeout.signal
+    : signal;
+  const response = await fetch(url, { signal: combinedSignal, headers: authHeaders() });
   if (!response.ok) throw new Error(`arXiv responded ${response.status}`);
   const xml = await response.text();
   const doc = new DOMParser().parseFromString(xml, "application/xml");
@@ -106,11 +122,19 @@ async function searchArxiv(
 async function searchPubMed(
   query: string,
   signal: AbortSignal,
+  timeoutMs?: number,
 ): Promise<MentoResult[]> {
   const searchUrl =
     "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&retmax=15&term=" +
     encodeURIComponent(query);
-  const searchResponse = await fetch(searchUrl, { signal });
+  const timeout = timeoutMs ? new AbortController() : null;
+  const timer = timeout ? setTimeout(() => timeout.abort(), timeoutMs) : null;
+  const combinedSignal = timeout
+    ? signal
+      ? AbortSignal.any([signal, timeout.signal])
+      : timeout.signal
+    : signal;
+  const searchResponse = await fetch(searchUrl, { signal: combinedSignal });
   if (!searchResponse.ok)
     throw new Error(`PubMed responded ${searchResponse.status}`);
   const searchData = await searchResponse.json();
@@ -120,7 +144,7 @@ async function searchPubMed(
   const summaryUrl =
     "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&retmode=json&id=" +
     ids.join(",");
-  const summaryResponse = await fetch(summaryUrl, { signal });
+  const summaryResponse = await fetch(summaryUrl, { signal: combinedSignal });
   if (!summaryResponse.ok)
     throw new Error(`PubMed responded ${summaryResponse.status}`);
   const summaryData = await summaryResponse.json();
@@ -154,11 +178,19 @@ async function searchPubMed(
 async function searchEuropePMC(
   query: string,
   signal: AbortSignal,
+  timeoutMs?: number,
 ): Promise<MentoResult[]> {
   const url =
     "https://www.ebi.ac.uk/europepmc/webservices/rest/search?format=json&resultType=core&pageSize=15&query=" +
     encodeURIComponent(query);
-  const response = await fetch(url, { signal });
+  const timeout = timeoutMs ? new AbortController() : null;
+  const timer = timeout ? setTimeout(() => timeout.abort(), timeoutMs) : null;
+  const combinedSignal = timeout
+    ? signal
+      ? AbortSignal.any([signal, timeout.signal])
+      : timeout.signal
+    : signal;
+  const response = await fetch(url, { signal: combinedSignal });
   if (!response.ok) throw new Error(`Europe PMC responded ${response.status}`);
   const data = await response.json();
   const items: any[] = data?.resultList?.result || [];
@@ -192,11 +224,19 @@ async function searchEuropePMC(
 async function searchCrossref(
   query: string,
   signal: AbortSignal,
+  timeoutMs?: number,
 ): Promise<MentoResult[]> {
   const url =
     "https://api.crossref.org/works?rows=15&select=title,author,abstract,DOI,URL,is-referenced-by-count,published-print,published-online,container-title&query=" +
     encodeURIComponent(query);
-  const response = await fetch(url, { signal });
+  const timeout = timeoutMs ? new AbortController() : null;
+  const timer = timeout ? setTimeout(() => timeout.abort(), timeoutMs) : null;
+  const combinedSignal = timeout
+    ? signal
+      ? AbortSignal.any([signal, timeout.signal])
+      : timeout.signal
+    : signal;
+  const response = await fetch(url, { signal: combinedSignal });
   if (!response.ok) throw new Error(`Crossref responded ${response.status}`);
   const data = await response.json();
   const items: any[] = data?.message?.items || [];
@@ -246,10 +286,18 @@ function reconstructAbstract(
 async function searchOpenAlex(
   query: string,
   signal: AbortSignal,
+  timeoutMs?: number,
 ): Promise<MentoResult[]> {
   const url =
     "https://api.openalex.org/works?per-page=15&search=" + encodeURIComponent(query);
-  const response = await fetch(url, { signal });
+  const timeout = timeoutMs ? new AbortController() : null;
+  const timer = timeout ? setTimeout(() => timeout.abort(), timeoutMs) : null;
+  const combinedSignal = timeout
+    ? signal
+      ? AbortSignal.any([signal, timeout.signal])
+      : timeout.signal
+    : signal;
+  const response = await fetch(url, { signal: combinedSignal });
   if (!response.ok) throw new Error(`OpenAlex responded ${response.status}`);
   const data = await response.json();
   const items: any[] = data?.results || [];
@@ -351,13 +399,14 @@ export async function runMentoSearch(
   query: string,
   enabledIds: Set<string>,
   signal: AbortSignal,
+  timeoutMs?: number,
 ): Promise<SearchOutcome> {
   const active = SOURCES.filter((source) => enabledIds.has(source.id));
   if (!active.length) {
     throw new Error("Enable at least one trusted source to search.");
   }
   const settled = await Promise.allSettled(
-    active.map((source) => source.search(query, signal)),
+    active.map((source) => source.search(query, signal, timeoutMs)),
   );
   const failedSources: string[] = [];
   const groups: MentoResult[][] = [];

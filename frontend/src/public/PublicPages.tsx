@@ -723,7 +723,7 @@ function AuthShell({ children }: { children: ReactNode }) {
                 Progress starts with showing up.
               </div>
             </div>
-            <span className="auth-art-spark">✦</span>
+
           </div>
           <div className="auth-story-bottom">
             <span>
@@ -880,6 +880,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
   const [confirm, setConfirm] = useState("");
   const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
   const [error, setError] = useState("");
   const [fields, setFields] = useState<Record<string, string>>({});
   const [sent, setSent] = useState(false);
@@ -951,7 +952,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
     if (signup && password.length < 8)
       issues.password = "Use at least 8 characters.";
     if (signup && password !== confirm)
-      issues.confirm = "Your passwords don’t match.";
+      issues.confirm = "Your passwords don't match.";
     setFields(issues);
     if (Object.keys(issues).length) return;
     setBusy(true);
@@ -1037,7 +1038,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
   }
   async function handleGoogleSignIn() {
     setError("");
-    setBusy(true);
+    setGoogleBusy(true);
     try {
       const auth = await requireAccounts();
       await setPersistence(
@@ -1067,12 +1068,12 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
         setError(authError(e));
       }
     } finally {
-      setBusy(false);
+      setGoogleBusy(false);
     }
   }
   async function handleGoogleCredential(credential: string) {
     setError("");
-    setBusy(true);
+    setGoogleBusy(true);
     try {
       // Register-if-needed and sign in in one step so Google continues straight
       // into the existing workspace instead of stopping at a confirmation screen.
@@ -1081,7 +1082,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
     } catch (e) {
       setError(authError(e));
     } finally {
-      setBusy(false);
+      setGoogleBusy(false);
     }
   }
   const suffix = `?next=${encodeURIComponent(next)}`;
@@ -1153,7 +1154,7 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
           <>
             {!reset && googleMode && (
               <div className="auth-provider-option">
-                {busy ? (
+                {googleBusy ? (
                   <p className="auth-notice" role="status"><LoaderCircle className="loading-spin" size={18} /> Signing in…</p>
                 ) : (
                   <GoogleSignInButton
@@ -1172,10 +1173,14 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
                   type="button"
                   className="auth-google-btn"
                   onClick={handleGoogleSignIn}
-                  disabled={busy}
+                  disabled={googleBusy}
                   aria-label="Continue with Google"
                 >
-                  <GoogleIcon size={18} />
+                  {googleBusy ? (
+                    <LoaderCircle className="loading-spin" size={18} />
+                  ) : (
+                    <GoogleIcon size={18} />
+                  )}
                   <span>Continue with Google</span>
                 </button>
                 <div className="auth-divider" role="separator" aria-label="or">

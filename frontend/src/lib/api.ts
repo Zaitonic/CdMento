@@ -18,17 +18,41 @@ export function authHeaders(): Record<string, string> {
 export async function api<T = any>(
   path: string,
   init: RequestInit = {},
+  timeoutMs?: number,
 ): Promise<T> {
-  const response = await fetch("/api/v1" + path, {
-    ...init,
-    headers: {
-      ...(init.body instanceof FormData
-        ? {}
-        : { "Content-Type": "application/json" }),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...init.headers,
-    },
-  });
+  const timeout = timeoutMs ? new AbortController() : null;
+  const timer = timeout
+    ? setTimeout(() => timeout.abort(), Math.max(1, timeoutMs ?? 30000))
+    : null;
+  const signal = timeout
+    ? init.signal
+      ? AbortSignal.any([init.signal, timeout.signal])
+      : timeout.signal
+    : init.signal;
+  let response: Response;
+  try {
+    response = await fetch("/api/v1" + path, {
+      ...init,
+      signal,
+      headers: {
+        ...(init.body instanceof FormData
+          ? {}
+          : { "Content-Type": "application/json" }),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...init.headers,
+      },
+    });
+  } catch (error) {
+    if (timeout?.signal.aborted && !init.signal?.aborted) {
+      throw new ApiError(
+        "This request took too long. Check your connection and retry.",
+        408,
+      );
+    }
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   if (response.status === 204) return undefined as T;
   let data;
   try {
@@ -101,19 +125,33 @@ export function searchBrief(
   sources: string[],
   sort: "relevance" | "newest",
   signal?: AbortSignal,
+  timeoutMs?: number,
 ): Promise<BriefResponse> {
   return api<BriefResponse>("/search/brief", {
     method: "POST",
     body: json({ query, sources, sort }),
     signal,
-  });
+  }, timeoutMs);
 }
 
-export async function waitForJob(id: string, onProgress?: (job: any) => void) {
+export async function waitForJob(
+  id: string,
+  onProgress?: (job: any) => void,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {},
+) {
+  const timeoutMs = options.timeoutMs ?? 6 * 60 * 1000;
+  const deadline = Date.now() + timeoutMs;
+  const signal = options.signal;
   for (let i = 0; i < 240; i++) {
+    if (signal?.aborted) throw new ApiError("Processing was cancelled.", 499);
+    if (Date.now() > deadline) {
+      throw new Error(
+        "Processing took too long. Check your connection, then retry.",
+      );
+    }
     let job;
     try {
-      job = await api("/jobs/" + id);
+      job = await api("/jobs/" + id, {}, 20_000);
     } catch (e: any) {
       if (e.status === 404)
         throw new Error(
