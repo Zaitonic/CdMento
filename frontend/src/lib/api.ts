@@ -137,9 +137,14 @@ export function searchBrief(
 export async function waitForJob(
   id: string,
   onProgress?: (job: any) => void,
-  options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  options: {
+    timeoutMs?: number;
+    pollTimeoutMs?: number;
+    signal?: AbortSignal;
+  } = {},
 ) {
   const timeoutMs = options.timeoutMs ?? 6 * 60 * 1000;
+  const pollTimeoutMs = options.pollTimeoutMs ?? 20_000;
   const deadline = Date.now() + timeoutMs;
   const signal = options.signal;
   for (let i = 0; i < 240; i++) {
@@ -151,7 +156,7 @@ export async function waitForJob(
     }
     let job;
     try {
-      job = await api("/jobs/" + id, {}, 20_000);
+      job = await api("/jobs/" + id, {}, pollTimeoutMs);
     } catch (e: any) {
       if (e.status === 404)
         throw new Error(

@@ -257,7 +257,13 @@ export function useArtifacts(kind: string, sourceId?: string) {
                     : "Creating your study material…",
               );
           },
-          { timeoutMs: 6 * 60 * 1000 },
+          {
+            timeoutMs: 6 * 60 * 1000,
+            // Vercel executes queued jobs while serving the polling request.
+            // Larger generations can legitimately take longer than the old
+            // 20-second per-poll timeout, even when the job will complete.
+            pollTimeoutMs: count > 10 ? 90_000 : 60_000,
+          },
         );
       if (mounted.current) {
         await reload();

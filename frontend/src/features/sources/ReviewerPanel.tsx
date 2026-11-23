@@ -226,6 +226,17 @@ export default function ReviewerPanel({
                   },
                   30_000,
                 );
+                // Keep the client store in lockstep with the authoritative
+                // save response before refresh/navigation. This prevents the
+                // autosave queue from re-submitting the pre-save empty note.
+                const state = useStore.getState();
+                state.set({
+                  notes: state.notes.some((item) => item.id === note.id)
+                    ? state.notes.map((item) =>
+                        item.id === note.id ? note : item,
+                      )
+                    : [...state.notes, note],
+                });
                 await useStore.getState().refresh();
                 toast.success("Reviewer saved to Notes.");
                 navigate(`/notes?note=${note.id}`);

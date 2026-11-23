@@ -7,6 +7,45 @@ import { useStore } from "../../lib/store";
 
 type OutlineHeading = { level: number; text: string };
 
+function hasDocumentText(value: any): boolean {
+  if (!value || typeof value !== "object") return false;
+  if (value.type === "text") return Boolean(value.text?.trim());
+  return Array.isArray(value.content) && value.content.some(hasDocumentText);
+}
+
+function isTipTapDocument(value: any): boolean {
+  if (!value || value.type !== "doc" || !Array.isArray(value.content)) {
+    return false;
+  }
+  const valid = new Set([
+    "doc",
+    "paragraph",
+    "heading",
+    "bullet_list",
+    "ordered_list",
+    "list_item",
+    "blockquote",
+    "hard_break",
+    "text",
+  ]);
+  const walk = (node: any): boolean => {
+    if (!node || typeof node !== "object" || !valid.has(node.type)) return false;
+    if (node.type === "text") return typeof node.text === "string";
+    if (node.type === "heading") {
+      const level = node.attrs?.level;
+      if (![1, 2, 3].includes(level)) return false;
+    }
+    return !node.content || (Array.isArray(node.content) && node.content.every(walk));
+  };
+  return value.content.every(walk);
+}
+
+function editorContent(note: { document?: object | null; content: string } | undefined) {
+  const document = note?.document;
+  if (isTipTapDocument(document) && hasDocumentText(document)) return document;
+  return note?.content?.trim() || "";
+}
+
 function extractHeadings(json: any): OutlineHeading[] {
   if (!json || json.type !== "doc") return [];
   const headings: OutlineHeading[] = [];
@@ -54,13 +93,18 @@ export default function Notes() {
   const requestedNote = params.get("note");
   const [id, setId] = useState(requestedNote || notes[0]?.id || "");
   useEffect(() => { if (requestedNote) setId(requestedNote); }, [requestedNote]);
-  const note = notes.find((n) => n.id === id) || notes[0];
+  // Do not temporarily fall back to the first note while a deep-linked note
+  // is still loading. That fallback can mount an empty editor and autosave it
+  // over the requested note before the workspace hydration finishes.
+  const note = requestedNote
+    ? notes.find((n) => n.id === requestedNote)
+    : notes.find((n) => n.id === id) || notes[0];
   const lastDocument = useRef("");
   const hydrating = useRef(false);
   const editor = useEditor(
     {
       extensions: [StarterKit],
-      content: (note?.document ?? note?.content ?? "") as any,
+      content: editorContent(note) as any,
       onUpdate: ({ editor }) => {
         if (hydrating.current) return;
         lastDocument.current = JSON.stringify(editor.getJSON());
@@ -78,11 +122,18 @@ export default function Notes() {
   );
   useEffect(() => {
     if (!editor || !note) return;
-    const content = note.document ?? note.content ?? "";
+    const content = editorContent(note);
     const signature = JSON.stringify(content);
     if (signature === lastDocument.current) return;
     hydrating.current = true;
-    editor.commands.setContent(content as any, { emitUpdate: false });
+    try {
+      editor.commands.setContent(content as any, { emitUpdate: false });
+    } catch {
+      // Legacy notes may contain malformed ProseMirror JSON. Falling back to
+      // their plain-text payload keeps the note editable instead of crashing
+      // the route on a direct reload.
+      editor.commands.setContent(note.content || "", { emitUpdate: false });
+    }
     lastDocument.current = JSON.stringify(editor.getJSON());
     hydrating.current = false;
   }, [editor, note?.id, note?.document, note?.content]);

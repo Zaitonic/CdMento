@@ -1,6 +1,6 @@
 // CdMento Progressive Web App Service Worker
 // Bump the version whenever the caching strategy changes so old caches purge.
-const CACHE_NAME = "cdmento-app-v2";
+const CACHE_NAME = "cdmento-app-v3";
 const STATIC_ASSETS = [
   "/",
   "/workspace",
