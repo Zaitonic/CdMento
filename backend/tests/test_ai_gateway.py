@@ -287,6 +287,38 @@ def test_reviewer_processes_last_section_and_checks_quotes(tmp_path):
     assert len(review["sections"]) == 2
 
 
+def test_generation_tops_up_to_exact_requested_count(tmp_path):
+    calls = []
+
+    def handler(request):
+        prompt = json.loads(request.content)["messages"][1]["content"]
+        batch = len(calls)
+        calls.append(json.loads(request.content)["max_tokens"])
+        target = 2 if "exactly 2" in prompt else 10
+        return result(
+            request,
+            {
+                "cards": [
+                    {
+                        "question": f"What is concept {i + batch * 10}?",
+                        "answer": f"Concept {i + batch * 10} is supported by the source.",
+                        "source_ids": ["s"],
+                        "concept": f"Concept {i + batch * 10}",
+                    }
+                    for i in range(target)
+                ],
+            },
+        )
+
+    ai = AIService(config(tmp_path), Repository(tmp_path), httpx.MockTransport(handler))
+    cards = ai.generate(
+        {"kind": "flashcards", "count": 12, "topic": "concepts", "difficulty": "medium"},
+        [{"id": "s", "name": "lesson.txt", "text": "Concepts are useful. " * 20}],
+    )
+    assert len(cards["cards"]) == 12
+    assert len(calls) == 2 and calls[0] > 2400 and calls[1] >= 1200
+
+
 def api_environment(tmp_path, handler):
     settings = config(tmp_path)
     repo = Repository(tmp_path)
@@ -419,9 +451,27 @@ def test_reviewer_saves_validated_material_to_note_once(tmp_path):
             reviewer["sections"][0]["citations"][0]["quote"]
             == "Variables store values."
         )
+        service.repo.put(
+            "local-workspace",
+            "notes",
+            {
+                "id": "existing-review-note",
+                "notebook": book["id"],
+                "title": reviewer["title"],
+                "content": "",
+                "document": {"type": "doc", "content": []},
+                "reviewer_id": reviewer["id"],
+            },
+            expected=0,
+        )
         first = client.post(f"/api/v1/artifacts/{reviewer['id']}/save-note")
         second = client.post(f"/api/v1/artifacts/{reviewer['id']}/save-note")
-        assert first.status_code == 201 and second.json()["id"] == first.json()["id"]
+        assert (
+            first.status_code == 201
+            and first.json()["id"] == "existing-review-note"
+            and second.json()["id"] == first.json()["id"]
+            and first.json()["content"]
+        )
         document = first.json()["document"]
         assert document["type"] == "doc"
         assert document["content"][0] == {

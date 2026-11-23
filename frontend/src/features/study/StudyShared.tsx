@@ -95,7 +95,7 @@ function rememberReviewer(key: string, id: string) {
 export function useArtifacts(kind: string, sourceId?: string) {
   const ai = useAI();
   const [topic, setTopic] = useState("");
-  const [count, setCount] = useState(8);
+  const [itemsInput, setItemsInput] = useState("8");
   const [difficulty, setDifficulty] = useState("medium");
   const [progress, setProgress] = useState("");
   const notebook = useStore((s) => s.active);
@@ -220,6 +220,8 @@ export function useArtifacts(kind: string, sourceId?: string) {
 
   const generate = async (extra: Record<string, unknown> = {}) => {
     if (busy || !ai.ready || !notebook) return;
+    const count = Math.min(30, Math.max(1, Number(itemsInput) || 1));
+    setItemsInput(String(count));
     lastRequest.current = extra;
     hasGenerated.current = true;
     setBusy(true);
@@ -299,11 +301,14 @@ export function useArtifacts(kind: string, sourceId?: string) {
             type="number"
             min={1}
             max={30}
-            value={count}
-            onChange={(e) =>
-              setCount(Math.min(30, Math.max(1, Number(e.target.value))))
-            }
+            value={itemsInput}
+            onChange={(e) => setItemsInput(e.target.value)}
+            onBlur={() => {
+              const value = Math.min(30, Math.max(1, Number(itemsInput) || 1));
+              setItemsInput(String(value));
+            }}
           />
+          <small>1–30 items</small>
         </label>
         <label>
           Difficulty
@@ -324,6 +329,18 @@ export function useArtifacts(kind: string, sourceId?: string) {
           <Sparkles size={16} />
           {busy ? "Creating…" : "Generate with AI"}
         </button>
+      </div>
+      <div className="generation-presets" aria-label="Item count presets">
+        {[5, 10, 15, 20, 30].map((value) => (
+          <button
+            key={value}
+            type="button"
+            className={itemsInput === String(value) ? "active" : ""}
+            onClick={() => setItemsInput(String(value))}
+          >
+            {value}
+          </button>
+        ))}
       </div>
       {progress && (
         <p className="generation-progress" role="status">

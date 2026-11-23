@@ -1,5 +1,5 @@
 import { useSearchParams } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, NotebookPen, Trash2, Check, BookOpen } from "lucide-react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -55,11 +55,15 @@ export default function Notes() {
   const [id, setId] = useState(requestedNote || notes[0]?.id || "");
   useEffect(() => { if (requestedNote) setId(requestedNote); }, [requestedNote]);
   const note = notes.find((n) => n.id === id) || notes[0];
+  const lastDocument = useRef("");
+  const hydrating = useRef(false);
   const editor = useEditor(
     {
       extensions: [StarterKit],
       content: (note?.document ?? note?.content ?? "") as any,
       onUpdate: ({ editor }) => {
+        if (hydrating.current) return;
+        lastDocument.current = JSON.stringify(editor.getJSON());
         const state = useStore.getState();
         state.set({
           notes: state.notes.map((n) =>
@@ -72,6 +76,16 @@ export default function Notes() {
     },
     [note?.id],
   );
+  useEffect(() => {
+    if (!editor || !note) return;
+    const content = note.document ?? note.content ?? "";
+    const signature = JSON.stringify(content);
+    if (signature === lastDocument.current) return;
+    hydrating.current = true;
+    editor.commands.setContent(content as any, { emitUpdate: false });
+    lastDocument.current = JSON.stringify(editor.getJSON());
+    hydrating.current = false;
+  }, [editor, note?.id, note?.document, note?.content]);
   return (
     <section className="feature-screen notes-screen">
       <PageTitle

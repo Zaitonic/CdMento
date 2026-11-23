@@ -596,22 +596,88 @@ class AIService:
                 ):
                     raise ValueError("Invalid map connections")
 
-        return self.gateway.complete(
-            schema,
-            SYSTEM,
-            (
-                f"Create a {request['kind']} in simple English from the evidence below. "
-                f"Target {request['count']} items. Difficulty: {request['difficulty']}. "
-                f"Topic: {request['topic'] or 'key concepts'}. "
-                f"Valid source_ids (copy exactly, without a SOURCE prefix): {json.dumps(sorted(allowed))}. "
-                "Cards: one testable idea each, grounded in a verbatim quote. "
-                "Quiz: four plausible distinct choices, one correct answer, with explanation. "
-                "Maps: every edge source and target MUST exactly match an id in nodes. Never reference an undeclared node. Only include relationships explicitly supported by the evidence; return edges=[] when the concepts have no stated relationship. Never add an edge labeled not related. "
-                "Use short questions, plain explanations, and clear concept labels. "
-                "Do not put raw source IDs in questions, answers, explanations, or labels. "
-                "Use only the passages below; do not claim whole-document coverage.\n"
-                "SOURCE EVIDENCE:\n"
-                f"{evidence_text(units)}"
-            ),
-            validate,
-        )
+        target = request["count"]
+        collection_key = {
+            "flashcards": "cards",
+            "quiz": "questions",
+            "mindmap": "nodes",
+        }[request["kind"]]
+        combined = {collection_key: []}
+        if request["kind"] == "mindmap":
+            combined["edges"] = []
+        seen = set()
+        for _ in range(3):
+            remaining = target - len(combined[collection_key])
+            if remaining <= 0:
+                break
+            batch_target = min(10, remaining)
+            excluded = ", ".join(sorted(seen)) or "none"
+
+            def validate_batch(result):
+                validate(result)
+
+            result = self.gateway.complete(
+                schema,
+                SYSTEM,
+                (
+                    f"Create exactly {batch_target} new {request['kind']} items in simple English from the evidence below. "
+                    f"The overall request is {target} items; this is a bounded batch. Difficulty: {request['difficulty']}. "
+                    f"Topic: {request['topic'] or 'key concepts'}. "
+                    f"Do not repeat these existing item labels/questions: {excluded}. "
+                    f"Valid source_ids (copy exactly, without a SOURCE prefix): {json.dumps(sorted(allowed))}. "
+                    "Cards: one testable idea each, grounded in a verbatim quote. "
+                    "Quiz: four plausible distinct choices, one correct answer, with explanation. "
+                    "Maps: every edge source and target MUST exactly match an id in nodes. Never reference an undeclared node. Only include relationships explicitly supported by the evidence; return edges=[] when the concepts have no stated relationship. Never add an edge labeled not related. "
+                    "Use short questions, plain explanations, and clear concept labels. "
+                    "Do not put raw source IDs in questions, answers, explanations, or labels. "
+                    "Use only the passages below; do not claim whole-document coverage.\n"
+                    "SOURCE EVIDENCE:\n"
+                    f"{evidence_text(units)}"
+                ),
+                validate_batch,
+                max_tokens=min(8192, 1200 + batch_target * 220),
+            )
+            if request["kind"] == "mindmap":
+                remapped = {}
+                used_ids = {node["id"] for node in combined["nodes"]}
+                for item in result["nodes"]:
+                    identity = item.get("label", "").strip().casefold()
+                    if not identity or identity in seen:
+                        continue
+                    seen.add(identity)
+                    node_id = item["id"]
+                    while node_id in used_ids:
+                        node_id = f"{item['id']}-{len(used_ids) + 1}"
+                    used_ids.add(node_id)
+                    remapped[item["id"]] = node_id
+                    combined["nodes"].append({**item, "id": node_id})
+                combined["edges"].extend(
+                    {
+                        **edge,
+                        "source": remapped.get(edge["source"], edge["source"]),
+                        "target": remapped.get(edge["target"], edge["target"]),
+                    }
+                    for edge in result.get("edges", [])
+                )
+            else:
+                for item in result[collection_key]:
+                    identity = item.get("question", "").strip().casefold()
+                    if identity and identity not in seen:
+                        seen.add(identity)
+                        combined[collection_key].append(item)
+        if len(combined[collection_key]) != target:
+            raise ValueError(
+                f"The selected material could only support {len(combined[collection_key])} distinct items. Try a smaller item count or select more source material."
+            )
+        if request["kind"] == "mindmap":
+            ids = {node["id"] for node in combined["nodes"]}
+            edges = []
+            seen_edges = set()
+            for edge in combined["edges"]:
+                key = (edge["source"], edge["target"], edge.get("label", ""))
+                if key not in seen_edges and edge["source"] in ids and edge["target"] in ids:
+                    seen_edges.add(key)
+                    edges.append(edge)
+            combined["edges"] = edges
+        combined["_ai"] = result["_ai"]
+        return combined

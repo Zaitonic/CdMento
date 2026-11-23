@@ -429,8 +429,8 @@ class Gateway:
             except (ValueError, TypeError, OverflowError):
                 return 60
 
-    def request(self, provider, instructions, prompt, schema=None):
-        max_tokens = self.settings.ai_max_output_tokens
+    def request(self, provider, instructions, prompt, schema=None, max_tokens=None):
+        max_tokens = max_tokens or self.settings.ai_max_output_tokens
         messages = [
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": prompt},
@@ -475,7 +475,7 @@ class Gateway:
             extra_payload=extra_payload,
         )
 
-    def complete(self, schema, system, prompt, validate=None):
+    def complete(self, schema, system, prompt, validate=None, max_tokens=None):
         self.require()
         check = getattr(self, "permission_check", None)
         if check and not any(check(p.name) for p in self.providers):
@@ -509,7 +509,7 @@ class Gateway:
                     continue
             try:
                 attempts += 1
-                response = self.request(p, instructions, prompt, schema)
+                response = self.request(p, instructions, prompt, schema, max_tokens)
             except httpx.HTTPError:
                 self.cooldown(p, 60)
                 retry.append(60)
