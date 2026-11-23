@@ -424,8 +424,9 @@ header {
 }
 .content-layout {
   display: flex;
-  max-width: 1700px;
-  margin: auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
   flex: 1;
   overflow: hidden;
   min-height: 0;
@@ -436,6 +437,12 @@ main {
   min-width: 0;
   position: relative;
   overflow: auto;
+}
+[data-theme="dark"] .app main,
+[data-theme="dark"] .app .sidebar,
+[data-theme="dark"] .app .note-outline {
+  scrollbar-width: thin;
+  scrollbar-color: #55596d transparent;
 }
 .page-eyebrow {
   display: flex;

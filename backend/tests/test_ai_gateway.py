@@ -233,7 +233,7 @@ def test_all_exhausted_providers_return_retry_without_secrets(tmp_path):
     assert "secret" not in str(caught.value) and "private" not in str(caught.value)
 
 
-def test_reviewer_processes_last_section_and_checks_quotes(tmp_path):
+def test_reviewer_processes_last_section_without_citation_output(tmp_path):
     seen = []
 
     def handler(request):
@@ -244,8 +244,6 @@ def test_reviewer_processes_last_section_and_checks_quotes(tmp_path):
             else payload["messages"][1]["content"]
         )
         seen.append(prompt)
-        page = 2 if '"page": 2' in prompt else 1
-        quote = "End of the chapter." if page == 2 else "Variables store values."
         review = {
             "title": "Programming reviewer",
             "overview": "Overview",
@@ -253,14 +251,6 @@ def test_reviewer_processes_last_section_and_checks_quotes(tmp_path):
                 {
                     "heading": "Concept",
                     "content": "Explanation grounded in source.",
-                    "citations": [
-                        {
-                            "source_id": "s",
-                            "page": page,
-                            "section": None,
-                            "quote": quote,
-                        }
-                    ],
                 }
             ],
             "practice_questions": [],
@@ -405,7 +395,7 @@ def test_generation_waits_durably_and_checkpoint_not_public(tmp_path):
         assert duplicate["job_id"] == generated["job_id"]
 
 
-def reviewer_value(source_id, quote="Variables store values."):
+def reviewer_value(source_id=""):
     return {
         "title": "Programming reviewer",
         "overview": "A source-grounded overview.",
@@ -413,18 +403,12 @@ def reviewer_value(source_id, quote="Variables store values."):
             {
                 "heading": "Variables",
                 "content": "Variables store values.",
-                "citations": [
-                    {"source_id": source_id, "page": None, "section": 1, "quote": quote}
-                ],
             }
         ],
         "practice_questions": [
             {
                 "question": "What is a variable?",
                 "answer": "A place to store a value.",
-                "citations": [
-                    {"source_id": source_id, "page": None, "section": 1, "quote": quote}
-                ],
             }
         ],
         "warnings": [],
@@ -447,10 +431,7 @@ def test_reviewer_saves_validated_material_to_note_once(tmp_path):
         job = client.get(f"/api/v1/jobs/{generated['job_id']}").json()
         assert job["status"] == "completed"
         reviewer = client.get(f"/api/v1/artifacts/{generated['artifact_id']}").json()
-        assert (
-            reviewer["sections"][0]["citations"][0]["quote"]
-            == "Variables store values."
-        )
+        assert reviewer["sections"][0]["content"] == "Variables store values."
         service.repo.put(
             "local-workspace",
             "notes",
@@ -480,7 +461,10 @@ def test_reviewer_saves_validated_material_to_note_once(tmp_path):
             "content": [{"type": "text", "text": "Summary"}],
         }
         serialized_document = json.dumps(document, ensure_ascii=False)
-        assert "lesson.txt · section 1" in serialized_document
+        assert "lesson.txt" not in serialized_document
+        assert "section 1" not in serialized_document
+        assert "Q1." in serialized_document
+        assert "Answer:" in serialized_document
         assert sid not in serialized_document
         assert "Variables store values." in serialized_document
         assert all(
@@ -490,8 +474,8 @@ def test_reviewer_saves_validated_material_to_note_once(tmp_path):
             if block["type"] in {"paragraph", "heading"}
         )
         assert any(
-            block["type"] == "bullet_list"
-            and block["content"][0]["content"][0]["content"][0]["type"] == "text"
+            block["type"] == "heading"
+            and block["content"][0]["text"] == "Practice questions"
             for block in document["content"]
         )
         assert "sk-" not in json.dumps(reviewer)
@@ -506,7 +490,7 @@ def test_checkpoint_resumes_only_unfinished_reviewer_parts(tmp_path):
         calls.append(request)
         if len(calls) > 1 and not recover:
             return httpx.Response(429, headers={"Retry-After": "120"})
-        return result(request, reviewer_value(sid, "xxxxxxxx"))
+        return result(request, reviewer_value())
 
     client, service = api_environment(tmp_path, handler)
     with client:

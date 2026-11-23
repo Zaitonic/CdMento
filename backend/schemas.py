@@ -393,13 +393,11 @@ class Citation(Input):
 class ReviewerSection(Input):
     heading: str = Field(min_length=1, max_length=200)
     content: str = Field(min_length=1, max_length=5000)
-    citations: list[Citation] = Field(min_length=1, max_length=10)
 
 
 class ReviewerQuestion(Input):
     question: str = Field(min_length=3, max_length=1000)
     answer: str = Field(min_length=1, max_length=2000)
-    citations: list[Citation] = Field(min_length=1, max_length=5)
 
 
 class ReviewerBatch(Input):

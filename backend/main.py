@@ -2040,11 +2040,6 @@ def create_app(config=None, services=None):
         if artifact["kind"] != "guide":
             raise HTTPException(400, "Choose a saved reviewer.")
         options = options or S.ReviewerNoteOptions()
-        source_names = {
-            source["id"]: source.get("name") or "Source"
-            for source in repo.list(owner, "sources")
-        }
-
         def text_node(text, bold=False, italic=False):
             node = {"type": "text", "text": str(text)}
             marks = []
@@ -2109,18 +2104,6 @@ def create_app(config=None, services=None):
                     blocks.append(paragraph(text_node(" ".join(lines))))
             return blocks
 
-        def citation_line(citation):
-            name = source_names.get(citation.get("source_id")) or "Source"
-            if citation.get("page"):
-                location = f"page {citation['page']}"
-            elif citation.get("section"):
-                location = f"section {citation['section']}"
-            else:
-                location = ""
-            quote = citation.get("quote", "").strip()
-            suffix = f" · {location}" if location else ""
-            return f"“{quote}” — {name}{suffix}"
-
         document_content = []
         plain_lines = []
 
@@ -2136,12 +2119,7 @@ def create_app(config=None, services=None):
                 title = section.get("heading") or "Study section"
                 document_content.append(heading(title))
                 document_content.extend(text_blocks(section.get("content", "")))
-                citations = [
-                    citation_line(c) for c in section.get("citations", [])
-                ]
-                if citations:
-                    document_content.append(bullet_list(citations))
-                plain_lines.extend([title, section.get("content", ""), *citations])
+                plain_lines.extend([title, section.get("content", "")])
 
         if options.include_practice:
             questions = artifact.get("practice_questions", [])
@@ -2160,16 +2138,10 @@ def create_app(config=None, services=None):
                             text_node(question.get("answer", "")),
                         )
                     )
-                    citations = [
-                        citation_line(c) for c in question.get("citations", [])
-                    ]
-                    if citations:
-                        document_content.append(bullet_list(citations))
                     plain_lines.extend(
                         [
                             f"Q{index}. {question.get('question', '')}",
                             f"Answer: {question.get('answer', '')}",
-                            *citations,
                         ]
                     )
 

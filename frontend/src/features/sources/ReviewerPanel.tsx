@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { Sparkles, Save, FileText, RotateCw } from "lucide-react";
+import { Sparkles, Save, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
 import { type Source, useStore } from "../../lib/store";
@@ -54,18 +54,6 @@ export default function ReviewerPanel({
   const optionCount = Object.values(saveOptions).filter(Boolean).length;
   const toggleOption = (key: keyof typeof saveOptions) =>
     setSaveOptions((current) => ({ ...current, [key]: !current[key] }));
-  const citation = (c: SourceCitation, i: number) => (
-    <button
-      key={i}
-      className="reviewer-citation"
-      title={c.quote}
-      onClick={() => onCitation(c)}
-    >
-      <FileText size={12} />
-      {s.sources.find((x) => x.id === c.source_id)?.name || "Source"} ·{" "}
-      {c.page ? `p. ${c.page}` : `section ${c.section || 1}`}
-    </button>
-  );
   async function generate() {
     if (!source) return;
     try {
@@ -86,8 +74,7 @@ export default function ReviewerPanel({
       </span>
       <h2>From reading to remembering.</h2>
       <p>
-        Build a reviewer from the selected PDF or text. Every generated section
-        includes checked source quotes.
+        Build a clear, source-grounded reviewer from the selected material.
       </p>
       <AIAccess ai={a.ai} />
       <label>
@@ -173,9 +160,6 @@ export default function ReviewerPanel({
             <section key={i}>
               <h4>{section.heading}</h4>
               <p>{section.content}</p>
-              <div className="reviewer-citations">
-                {section.citations.map(citation)}
-              </div>
             </section>
           ))}
           {reviewer.practice_questions?.length > 0 && (
@@ -185,9 +169,6 @@ export default function ReviewerPanel({
                 <details key={i}>
                   <summary>{q.question}</summary>
                   <p>{q.answer}</p>
-                  <div className="reviewer-citations">
-                    {q.citations.map(citation)}
-                  </div>
                 </details>
               ))}
             </section>

@@ -546,7 +546,7 @@ main[data-feature="sources"] {
 }
 /* Notes: a notebook shelf, paper, and quiet outline */
 .notes-screen .notes-layout {
-  grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   border: 1px solid var(--border);
   border-radius: 16px;
   overflow: hidden;
@@ -570,6 +570,21 @@ main[data-feature="sources"] {
   border-radius: 0;
   min-width: 0;
 }
+.notes-screen .writing-workspace {
+  grid-template-columns: minmax(0, 1fr) 220px;
+}
+.generation-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) minmax(140px, 1fr) minmax(160px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+.generation-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
 .notes-screen .note-header {
   padding: 20px 25px;
 }
@@ -583,7 +598,7 @@ main[data-feature="sources"] {
 }
 .writing-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 160px;
+  grid-template-columns: minmax(0, 1fr) 200px;
   min-height: 520px;
 }
 .writing-page {
@@ -646,8 +661,9 @@ main[data-feature="sources"] {
 }
 /* Flashcards: focused practice stage */
 .flashcards-screen {
-  max-width: 1080px;
-  margin: auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
 }
 .flashcards-screen .study-tabs {
   justify-content: center;
@@ -992,6 +1008,12 @@ main[data-feature="mindmaps"] {
   .notes-screen .notes-layout {
     grid-template-columns: 170px minmax(0, 1fr);
   }
+  .notes-screen .writing-workspace {
+    grid-template-columns: minmax(0, 1fr) 170px;
+  }
+  .generation-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .feature-heading {
     align-items: flex-start;
     flex-direction: column;
@@ -1037,6 +1059,17 @@ main[data-feature="mindmaps"] {
   }
   .notes-screen .notes-layout {
     grid-template-columns: 1fr;
+  }
+  .notes-screen .writing-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .notes-screen .note-outline {
+    display: block;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  .generation-toolbar {
+    grid-template-columns: minmax(0, 1fr);
   }
   .notes-screen .notes-list {
     border-right: 0;
@@ -1419,6 +1452,7 @@ main[data-feature="mindmaps"] {
   /* App shell & sidebar */
   .app {
     padding: 0;
+    min-height: 100dvh;
   }
   .sidebar {
     width: 260px;
@@ -1428,7 +1462,9 @@ main[data-feature="mindmaps"] {
     position: fixed;
     top: 0;
     left: 0;
-    height: 100vh;
+    height: 100dvh;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
     overflow-y: auto;
     border-right: 1px solid var(--border);
   }
@@ -1445,6 +1481,13 @@ main[data-feature="mindmaps"] {
   .shell {
     padding: 0;
     width: 100%;
+  }
+  .shell > header {
+    padding-top: env(safe-area-inset-top);
+  }
+  .content-layout main {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+    overflow-x: hidden;
   }
   .header-left button[aria-label="Toggle sidebar"] {
     display: flex !important;
