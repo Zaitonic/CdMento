@@ -7,9 +7,9 @@
   font-synthesis: none;
   --bg: #fafbfe;
   --surface: #fff;
-  --text: #242538;
-  --muted: #737589;
-  --border: #eaeaf2;
+  --text: #1e293b;
+  --muted: #475569;
+  --border: #d7deea;
   --primary: #7560dc;
   --soft: #f2effc;
   --sidebar: #f7f8fc;
@@ -67,7 +67,7 @@ select {
   background: var(--surface);
 }
 input::placeholder {
-  color: #999bad;
+  color: #64748b;
 }
 h1,
 h2,

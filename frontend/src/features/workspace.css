@@ -577,7 +577,21 @@ main[data-feature="sources"] {
   display: grid;
   grid-template-columns: minmax(220px, 2fr) minmax(140px, 1fr) minmax(160px, 1fr) auto;
   gap: 12px;
-  align-items: end;
+  align-items: start;
+}
+.generation-toolbar > label {
+  display: grid;
+  grid-template-rows: auto 44px 1lh;
+  align-content: start;
+  gap: 6px;
+}
+.generation-toolbar > label > small {
+  min-height: 1lh;
+  line-height: 1lh;
+}
+.generation-toolbar > button {
+  align-self: start;
+  min-height: 44px;
 }
 .generation-presets {
   display: flex;
