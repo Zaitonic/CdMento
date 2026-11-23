@@ -422,7 +422,28 @@ def test_reviewer_saves_validated_material_to_note_once(tmp_path):
         first = client.post(f"/api/v1/artifacts/{reviewer['id']}/save-note")
         second = client.post(f"/api/v1/artifacts/{reviewer['id']}/save-note")
         assert first.status_code == 201 and second.json()["id"] == first.json()["id"]
-        assert "Variables store values." in json.dumps(first.json()["document"])
+        document = first.json()["document"]
+        assert document["type"] == "doc"
+        assert document["content"][0] == {
+            "type": "heading",
+            "attrs": {"level": 2},
+            "content": [{"type": "text", "text": "Summary"}],
+        }
+        serialized_document = json.dumps(document, ensure_ascii=False)
+        assert "lesson.txt · section 1" in serialized_document
+        assert sid not in serialized_document
+        assert "Variables store values." in serialized_document
+        assert all(
+            isinstance(node, dict)
+            for block in document["content"]
+            for node in block.get("content", [])
+            if block["type"] in {"paragraph", "heading"}
+        )
+        assert any(
+            block["type"] == "bullet_list"
+            and block["content"][0]["content"][0]["content"][0]["type"] == "text"
+            for block in document["content"]
+        )
         assert "sk-" not in json.dumps(reviewer)
 
 

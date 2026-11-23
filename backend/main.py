@@ -2074,7 +2074,10 @@ def create_app(config=None, services=None):
             return {
                 "type": "bullet_list",
                 "content": [
-                    {"type": "list_item", "content": [paragraph(item)]}
+                    {
+                        "type": "list_item",
+                        "content": [paragraph(text_node(item))],
+                    }
                     for item in items
                     if item
                 ],
@@ -2115,7 +2118,7 @@ def create_app(config=None, services=None):
             else:
                 location = ""
             quote = citation.get("quote", "").strip()
-            suffix = f", {location}" if location else ""
+            suffix = f" · {location}" if location else ""
             return f"“{quote}” — {name}{suffix}"
 
         document_content = []
