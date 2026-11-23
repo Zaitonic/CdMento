@@ -1,4 +1,12 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import {
+  Component,
+  lazy,
+  Suspense,
+  useEffect,
+  useState,
+  type ErrorInfo,
+  type ReactNode,
+} from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { MotionConfig } from "motion/react";
 import { Toaster } from "sonner";
@@ -19,6 +27,45 @@ import "./public/public.css";
 import "./public/public-theme.css";
 import "./public/light-typography.css";
 const Workspace = lazy(() => import("./App"));
+
+type WorkspaceBoundaryState = { error: Error | null };
+
+class WorkspaceErrorBoundary extends Component<
+  { children: ReactNode },
+  WorkspaceBoundaryState
+> {
+  state: WorkspaceBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): WorkspaceBoundaryState {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("Workspace failed to render", error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="public-site public-loading" role="alert">
+          <PublicBrand />
+          <h1>We couldn’t open this workspace.</h1>
+          <p>
+            The page loaded, but one workspace component failed. Reload to
+            recover the latest version.
+          </p>
+          <button
+            className="pub-button"
+            onClick={() => window.location.reload()}
+          >
+            Reload workspace
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function ProtectedWorkspace() {
   const { user, demo, provider, loading } = useSession();
@@ -86,15 +133,17 @@ function ProtectedWorkspace() {
       </div>
     );
   return (
-    <Suspense
-      fallback={
-        <div className="public-site public-loading" role="status">
-          Opening your workspace…
-        </div>
-      }
-    >
-      <Workspace />
-    </Suspense>
+    <WorkspaceErrorBoundary>
+      <Suspense
+        fallback={
+          <div className="public-site public-loading" role="status">
+            Opening your workspace…
+          </div>
+        }
+      >
+        <Workspace />
+      </Suspense>
+    </WorkspaceErrorBoundary>
   );
 }
 export default function Root() {

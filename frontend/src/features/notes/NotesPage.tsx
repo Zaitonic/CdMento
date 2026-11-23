@@ -253,7 +253,13 @@ export default function Notes() {
             </div>
           </div>
         ) : (
-          <Empty text="Create your first note to get started." />
+          <Empty
+            text={
+              requestedNote
+                ? "This note is not available in the current workspace."
+                : "Create your first note to get started."
+            }
+          />
         )}
       </div>
     </section>

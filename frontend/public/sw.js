@@ -1,6 +1,6 @@
 // CdMento Progressive Web App Service Worker
 // Bump the version whenever the caching strategy changes so old caches purge.
-const CACHE_NAME = "cdmento-app-v3";
+const CACHE_NAME = "cdmento-app-v4";
 const STATIC_ASSETS = [
   "/",
   "/workspace",
@@ -65,7 +65,7 @@ self.addEventListener("fetch", (event) => {
   // 4. For navigation (HTML document): Network-first with offline cache fallback
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request).catch(() => {
+      fetch(request, { cache: "no-store" }).catch(() => {
         return caches.match(request).then((cached) => {
           return cached || caches.match("/") || caches.match("/workspace");
         });
