@@ -712,7 +712,7 @@ export default function App() {
               {s.ready &&
                 s.active &&
                 sources.length > 0 &&
-                ["/chat", "/flashcards", "/quizzes", "/mindmaps"].includes(
+                ["/flashcards", "/quizzes", "/mindmaps"].includes(
                   location.pathname,
                 ) && (
                   <details className="source-selection">
@@ -760,7 +760,7 @@ export default function App() {
 
               {s.ready &&
                 s.active &&
-                !["/workspace", "/notebooks", "/sources", "/search", "/profile"].includes(
+                !["/workspace", "/notebooks", "/sources", "/search", "/profile", "/chat"].includes(
                   location.pathname,
                 ) && (
                   <div className="active-notebook">

@@ -1870,19 +1870,88 @@ def create_app(config=None, services=None):
         record_activity(owner, "deleted_note", title, f"Note: {note_id}", request)
         return Response(status_code=204)
 
+    def conversation_record(nid, conversation_id, owner):
+        notebook(owner, nid)
+        value = repo.get(owner, "conversations", conversation_id)
+        if value is None and conversation_id == nid:
+            return {
+                "id": nid,
+                "notebook": nid,
+                "title": "New chat",
+                "messages": [],
+                "summary": "",
+            }
+        if not value or value.get("notebook") != nid:
+            raise HTTPException(404, "Conversation not found.")
+        return value
+
     @app.get("/api/v1/notebooks/{nid}/conversation")
     def conversation(nid: str, owner: Owner):
+        return conversation_record(nid, nid, owner)
+
+    @app.get("/api/v1/notebooks/{nid}/conversations")
+    def list_conversations(nid: str, owner: Owner):
         notebook(owner, nid)
-        return repo.get(owner, "conversations", nid) or {
-            "id": nid,
+        result = []
+        for value in repo.list(owner, "conversations"):
+            if value.get("notebook") != nid:
+                continue
+            messages = value.get("messages") or []
+            first_user = next(
+                (message.get("text", "") for message in messages if message.get("role") == "user"),
+                "",
+            )
+            created_at = value.get("created_at") or next(
+                (message.get("created_at") for message in messages if message.get("created_at")),
+                "",
+            )
+            updated_at = value.get("updated_at") or next(
+                (message.get("created_at") for message in reversed(messages) if message.get("created_at")),
+                created_at,
+            )
+            title = value.get("title") or (first_user.strip().splitlines() or [""])[0][:80] or "New chat"
+            result.append({
+                "id": value["id"],
+                "notebook": nid,
+                "title": title,
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "message_count": len(messages),
+            })
+        return sorted(result, key=lambda item: item["updated_at"], reverse=True)
+
+    @app.post("/api/v1/notebooks/{nid}/conversations", status_code=201)
+    def create_conversation(nid: str, owner: Owner):
+        notebook(owner, nid)
+        timestamp = now()
+        value = {
+            "id": identifier(),
             "notebook": nid,
+            "title": "New chat",
             "messages": [],
+            "summary": "",
+            "created_at": timestamp,
+            "updated_at": timestamp,
         }
+        saved = repo.put(owner, "conversations", value)
+        return {**saved, "message_count": 0}
+
+    @app.get("/api/v1/notebooks/{nid}/conversations/{conversation_id}")
+    def get_conversation(nid: str, conversation_id: str, owner: Owner):
+        return conversation_record(nid, conversation_id, owner)
+
+    @app.delete("/api/v1/notebooks/{nid}/conversations/{conversation_id}", status_code=204)
+    def delete_conversation(nid: str, conversation_id: str, owner: Owner):
+        conversation_record(nid, conversation_id, owner)
+        repo.delete(owner, "conversations", conversation_id)
+        return Response(status_code=204)
 
     @app.post("/api/v1/notebooks/{nid}/messages")
     def chat(nid: str, data: S.ChatInput, owner: Owner):
         sources = selected(owner, nid, data.source_ids)
         ai_ready(owner)
+        conversation_id = data.conversation_id or nid
+        history = conversation_record(nid, conversation_id, owner)
         with locks[(owner, nid, "chat")]:
             pending = next(
                 (
@@ -1890,6 +1959,7 @@ def create_app(config=None, services=None):
                     for j in repo.list(owner, "jobs")
                     if j["kind"] == "chat"
                     and j.get("notebook") == nid
+                    and (j.get("conversation_id") or j.get("notebook")) == conversation_id
                     and j["status"] in ("queued", "processing", "waiting")
                 ),
                 None,
@@ -1912,7 +1982,6 @@ def create_app(config=None, services=None):
                     },
                     status_code=202,
                 )
-            history = conversation(nid, owner)
             try:
                 result = service.ai_for(owner).answer(
                     {
@@ -1928,6 +1997,7 @@ def create_app(config=None, services=None):
                     owner,
                     "chat",
                     notebook=nid,
+                    conversation_id=conversation_id,
                     source_ids=[s["id"] for s in sources],
                     question=data.question,
                     status="waiting",
@@ -1963,7 +2033,14 @@ def create_app(config=None, services=None):
                         "kind": "connection",
                     },
                 ) from None
-            return service.save_answer(owner, nid, data.question, result, history)
+            return service.save_answer(
+                owner,
+                nid,
+                data.question,
+                result,
+                history,
+                conversation_id=conversation_id,
+            )
 
     @app.post("/api/v1/notebooks/{nid}/generations", status_code=202)
     def generate(nid: str, data: S.GenerationInput, owner: Owner):

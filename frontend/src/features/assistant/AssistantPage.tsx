@@ -10,6 +10,9 @@ import {
   FileText,
   Save,
   X,
+  Plus,
+  Trash2,
+  Clock3,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useStore } from "../../lib/store";
@@ -28,6 +31,15 @@ type Message = {
   text: string;
   citations?: Citation[];
   ai?: { provider: string; model: string };
+};
+type Conversation = {
+  id: string;
+  notebook: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  messages?: Message[];
 };
 function aiErrorMessage(error: {
   message?: string;
@@ -56,8 +68,11 @@ export default function AssistantPage() {
   const s = useStore();
   const navigate = useNavigate();
   const ai = useAI();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const [references, setReferences] = useState(true);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState<Conversation[]>([]);
+  const [conversationId, setConversationId] = useState(params.get("conversation") || "");
   const [messages, setMessages] = useState<Message[]>([]);
   const [question, setQuestion] = useState(params.get("question") || "");
   const [pending, setPending] = useState("");
@@ -75,26 +90,55 @@ export default function AssistantPage() {
     active.current = true;
     setMessages([]);
     setError("");
-    if (s.active)
-      api(`/notebooks/${s.active}/conversation`)
-        .then((data) => {
-          if (active.current) setMessages(data.messages);
-        })
-        .catch((e) => {
-          if (active.current) setError(e.message);
-        });
+    setConversationId("");
+    setQueuedJob("");
+    setHistory([]);
+    if (!s.active) return;
+    let current = true;
+    const notebookId = s.active;
+    api<Conversation[]>(`/notebooks/${notebookId}/conversations`)
+      .then(async (threads) => {
+        const requested = params.get("conversation");
+        let selected = threads.find((thread) => thread.id === requested);
+        if (!selected) selected = threads[0];
+        if (!selected)
+          selected = await api<Conversation>(`/notebooks/${notebookId}/conversations`, { method: "POST" });
+        if (!current) return;
+        const summary = { ...selected!, message_count: selected!.message_count ?? selected!.messages?.length ?? 0 };
+        setHistory([summary, ...threads.filter((thread) => thread.id !== selected!.id)]);
+        setConversationId(selected!.id);
+        setParams({ conversation: selected!.id }, { replace: true });
+      })
+      .catch((e) => {
+        if (current) setError(e.message);
+      });
     return () => {
+      current = false;
       active.current = false;
     };
   }, [s.active]);
   useEffect(() => {
+    if (!s.active || !conversationId) return;
     let current = true;
-    if (s.active)
+    setMessages([]);
+    api(`/notebooks/${s.active}/conversations/${conversationId}`)
+      .then((thread) => {
+        if (current) setMessages(thread.messages || []);
+      })
+      .catch((e) => {
+        if (current) setError(e.message);
+      });
+    return () => { current = false; };
+  }, [s.active, conversationId]);
+  useEffect(() => {
+    let current = true;
+    if (s.active && conversationId)
       api(`/notebooks/${s.active}/jobs`)
         .then((jobs) => {
           const job = jobs.find(
             (j: any) =>
               j.kind === "chat" &&
+              (j.conversation_id || j.notebook) === conversationId &&
               ["queued", "processing", "waiting"].includes(j.status),
           );
           if (current && job) {
@@ -109,7 +153,7 @@ export default function AssistantPage() {
     return () => {
       current = false;
     };
-  }, [s.active]);
+  }, [s.active, conversationId]);
   useEffect(() => {
     if (!queuedJob) return;
     let current = true;
@@ -118,9 +162,10 @@ export default function AssistantPage() {
         const job = await api(`/jobs/${queuedJob}`);
         if (!current) return;
         if (job.status === "completed") {
-          const history = await api(`/notebooks/${s.active}/conversation`);
+          const history = await api(`/notebooks/${s.active}/conversations/${conversationId}`);
           if (current) {
             setMessages(history.messages);
+            refreshHistory();
             setQueuedJob("");
             setQuestion("");
             setError("");
@@ -156,7 +201,7 @@ export default function AssistantPage() {
       current = false;
       clearInterval(timer);
     };
-  }, [queuedJob, s.active]);
+  }, [queuedJob, s.active, conversationId]);
   useEffect(() => {
     end.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [messages, busy]);
@@ -169,7 +214,9 @@ export default function AssistantPage() {
       return;
     }
     const notebook = s.active,
-      owner = s.owner;
+      owner = s.owner,
+      threadId = conversationId;
+    if (!threadId) return;
     setBusy(true);
     setPending(text);
     setError("");
@@ -180,6 +227,7 @@ export default function AssistantPage() {
         body: json({
           question: text,
           source_ids: useStore.getState().selectedSources,
+          conversation_id: threadId,
         }),
       });
       if (answer.job_id) {
@@ -194,7 +242,8 @@ export default function AssistantPage() {
       if (
         active.current &&
         useStore.getState().active === notebook &&
-        useStore.getState().owner === owner
+        useStore.getState().owner === owner &&
+        conversationId === threadId
       ) {
         setMessages((old) => [
           ...old,
@@ -203,6 +252,7 @@ export default function AssistantPage() {
         ]);
         setQuestion("");
         setRetryAt(0);
+        refreshHistory();
       }
     } catch (e: any) {
       if (active.current) {
@@ -214,6 +264,54 @@ export default function AssistantPage() {
         setBusy(false);
         setPending("");
       }
+    }
+  }
+  async function refreshHistory() {
+    if (!s.active) return;
+    try {
+      const threads = await api<Conversation[]>(`/notebooks/${s.active}/conversations`);
+      setHistory(threads);
+    } catch {
+      // The current conversation remains usable if the history refresh fails.
+    }
+  }
+  async function startNewChat() {
+    if (!s.active) return;
+    try {
+      const thread = await api<Conversation>(`/notebooks/${s.active}/conversations`, { method: "POST" });
+      setHistory((items) => [{ ...thread, message_count: thread.message_count ?? 0 }, ...items.filter((item) => item.id !== thread.id)]);
+      setConversationId(thread.id);
+      setParams({ conversation: thread.id });
+      setMessages([]);
+      setQuestion("");
+      setError("");
+      setQueuedJob("");
+      setHistoryOpen(false);
+    } catch (e: any) {
+      toast.error(e.message || "Could not start a new chat.");
+    }
+  }
+  function openChat(thread: Conversation) {
+    setConversationId(thread.id);
+    setParams({ conversation: thread.id });
+    setMessages([]);
+    setQuestion("");
+    setError("");
+    setQueuedJob("");
+    setHistoryOpen(false);
+  }
+  async function deleteChat(thread: Conversation) {
+    if (!window.confirm(`Delete “${thread.title}”? This cannot be undone.`)) return;
+    try {
+      await api(`/notebooks/${s.active}/conversations/${thread.id}`, { method: "DELETE" });
+      const remaining = history.filter((item) => item.id !== thread.id);
+      setHistory(remaining);
+      if (thread.id === conversationId) {
+        if (remaining[0]) openChat(remaining[0]);
+        else await startNewChat();
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Could not delete this chat.");
     }
   }
   async function saveNote(message: Message) {
@@ -257,64 +355,70 @@ export default function AssistantPage() {
   }
   return (
     <section className="feature-screen assistant-screen">
-      <div className="mobile-reference-desk">
-        <button
-          className="mobile-reference-toggle"
-          aria-expanded={mobileReferencesOpen}
-          onClick={() => setMobileReferencesOpen((open) => !open)}
+      <div className="chat-toolbar">
+        <select
+          className="chat-notebook-picker"
+          aria-label="Active notebook"
+          value={s.active}
+          onChange={(e) => s.set({ active: e.target.value })}
         >
-          <span>Study sources · {readySources} ready</span>
-          <span aria-hidden="true">{mobileReferencesOpen ? "⌃" : "⌄"}</span>
-        </button>
-        {mobileReferencesOpen && (
-          <div className="mobile-reference-content">
-            <div className="mobile-reference-heading">
-              <div>
-                <strong>Reference desk</strong>
-                <small>Documents in your active notebook</small>
-              </div>
-              <button
-                className="icon-button"
-                aria-label="Close references"
-                onClick={() => setMobileReferencesOpen(false)}
-              >
-                <X size={18} />
-              </button>
-            </div>
+          {s.notebooks.map((notebook) => (
+            <option key={notebook.id} value={notebook.id}>{notebook.name}</option>
+          ))}
+        </select>
+        <details className="chat-source-selection">
+          <summary>
+            Study sources · {s.selectedSources === null ? "All ready" : `${s.selectedSources.length} selected`}
+          </summary>
+          <div className="chat-source-options">
+            <button className="text-button" onClick={() => s.selectSources(null)}>Use all ready sources</button>
             {sources.map((source) => (
-              <button
-                className="mobile-reference-source"
-                key={source.id}
-                onClick={() =>
-                  navigate(`/sources?source=${encodeURIComponent(source.id)}`)
-                }
-              >
-                <BookOpen size={16} />
-                <span>{source.name}<small>{source.status}</small></span>
-              </button>
+              <label key={source.id}>
+                <input
+                  type="checkbox"
+                  disabled={source.status !== "ready"}
+                  checked={source.status === "ready" && (s.selectedSources === null || s.selectedSources.includes(source.id))}
+                  onChange={(e) => {
+                    const ids = s.selectedSources ?? sources.filter((item) => item.status === "ready").map((item) => item.id);
+                    s.selectSources(e.target.checked ? [...ids, source.id] : ids.filter((id) => id !== source.id));
+                  }}
+                />
+                {source.name}<small>{source.status}</small>
+              </label>
             ))}
-            {!sources.length && <p>No sources added yet.</p>}
-            <button className="secondary" onClick={() => navigate("/sources")}>
-              Manage sources
-            </button>
           </div>
-        )}
-      </div>
-      <div className="feature-heading">
-        <div>
-          <span className="eyebrow">YOUR THINKING PARTNER</span>
-          <h1>The conversation workspace</h1>
-          <p>Your questions, with your study material close at hand.</p>
+        </details>
+        <strong className="chat-toolbar-title">AI Assistant</strong>
+        <div className="chat-toolbar-actions">
+          <button className="secondary" onClick={() => setHistoryOpen(true)}>
+            <Clock3 size={15} /> History
+          </button>
+          <button className="secondary" onClick={startNewChat}>
+            <Plus size={15} /> New chat
+          </button>
+          <button className="secondary chat-reference-desktop" onClick={() => setReferences((value) => !value)} aria-expanded={references}>
+            <PanelRight size={15} /> References
+          </button>
+          <button className="secondary chat-reference-mobile" onClick={() => setMobileReferencesOpen((open) => !open)} aria-expanded={mobileReferencesOpen}>
+            <PanelRight size={15} /> References
+          </button>
         </div>
-        <button
-          className="secondary"
-          onClick={() => setReferences(!references)}
-          aria-expanded={references}
-        >
-          <PanelRight size={16} />
-          References
-        </button>
       </div>
+      {mobileReferencesOpen && (
+        <div className="mobile-reference-content">
+          <div className="mobile-reference-heading">
+            <div><strong>Reference desk</strong><small>Documents in your active notebook</small></div>
+            <button className="icon-button" aria-label="Close references" onClick={() => setMobileReferencesOpen(false)}><X size={18} /></button>
+          </div>
+          {sources.map((source) => (
+            <button className="mobile-reference-source" key={source.id} onClick={() => navigate(`/sources?source=${encodeURIComponent(source.id)}`)}>
+              <BookOpen size={16} /><span>{source.name}<small>{source.status}</small></span>
+            </button>
+          ))}
+          {!sources.length && <p>No sources added yet.</p>}
+          <button className="secondary" onClick={() => navigate("/sources")}>Manage sources</button>
+        </div>
+      )}
       <div className="assistant-ai-status"><AIAccess ai={ai} /></div>
       <div
         className={`assistant-workspace ${references ? "" : "references-hidden"}`}
@@ -470,6 +574,30 @@ export default function AssistantPage() {
           </aside>
         )}
       </div>
+      {historyOpen && (
+        <div className="chat-history-backdrop" onClick={() => setHistoryOpen(false)}>
+          <aside className="chat-history-drawer" role="dialog" aria-modal="true" aria-label="Chat history" onClick={(e) => e.stopPropagation()}>
+            <div className="chat-history-heading">
+              <div><span className="eyebrow">YOUR CONVERSATIONS</span><h2>Chat History</h2></div>
+              <button className="icon-button" aria-label="Close chat history" onClick={() => setHistoryOpen(false)}><X size={18} /></button>
+            </div>
+            <button className="primary chat-history-new" onClick={startNewChat}><Plus size={16} /> New chat</button>
+            {history.length ? (
+              <div className="chat-history-list">
+                {history.map((thread) => (
+                  <div className={`chat-history-item ${thread.id === conversationId ? "active" : ""}`} key={thread.id}>
+                    <button className="chat-history-open" onClick={() => openChat(thread)}>
+                      <strong>{thread.title || "New chat"}</strong>
+                      <small>{new Date(thread.updated_at || thread.created_at).toLocaleDateString()} · {thread.message_count} messages</small>
+                    </button>
+                    <button className="icon-button chat-history-delete" aria-label={`Delete ${thread.title || "chat"}`} onClick={() => deleteChat(thread)}><Trash2 size={15} /></button>
+                  </div>
+                ))}
+              </div>
+            ) : <p className="chat-history-empty">No saved conversations yet.</p>}
+          </aside>
+        </div>
+      )}
       {citation && (
         <div className="modal-backdrop" onClick={() => setCitation(null)}>
           <div

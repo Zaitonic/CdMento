@@ -537,15 +537,17 @@ def test_chat_queued_on_quota_then_continues_after_recovery(tmp_path):
     with client:
         book, sid = add_source(client, service)
         path = f"/api/v1/notebooks/{book['id']}/messages"
-        queued = client.post(path, json={"question": "What is a variable?"})
+        thread = client.post(f"/api/v1/notebooks/{book['id']}/conversations").json()
+        request = {"question": "What is a variable?", "conversation_id": thread["id"]}
+        queued = client.post(path, json=request)
         assert queued.status_code == 202
         jid = queued.json()["job_id"]
         assert (
-            client.post(path, json={"question": "What is a variable?"}).json()["job_id"]
+            client.post(path, json=request).json()["job_id"]
             == jid
         )
         assert (
-            client.post(path, json={"question": "Another question"}).status_code == 409
+            client.post(path, json={**request, "question": "Another question"}).status_code == 409
         )
         recover = True
         for p in service.ai.gateway.providers:
@@ -556,7 +558,9 @@ def test_chat_queued_on_quota_then_continues_after_recovery(tmp_path):
         job = service.repo.get("local-workspace", "jobs", jid)
         service.repo.put("local-workspace", "jobs", {**job, "retry_at": 0})
         service.run_job("local-workspace", jid)
-        history = client.get(f"/api/v1/notebooks/{book['id']}/conversation").json()
+        history = client.get(
+            f"/api/v1/notebooks/{book['id']}/conversations/{thread['id']}"
+        ).json()
         assert len(history["messages"]) == 2
         assert (
             history["messages"][-1]["citations"][0]["quote"]
@@ -566,7 +570,9 @@ def test_chat_queued_on_quota_then_continues_after_recovery(tmp_path):
         service.run_job("local-workspace", jid)
         assert (
             len(
-                client.get(f"/api/v1/notebooks/{book['id']}/conversation").json()[
+                client.get(
+                    f"/api/v1/notebooks/{book['id']}/conversations/{thread['id']}"
+                ).json()[
                     "messages"
                 ]
             )

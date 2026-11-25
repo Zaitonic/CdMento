@@ -324,7 +324,9 @@ class Services:
                     self.repo.delete(owner, kind, item["id"])
         self.repo.delete(owner, "notebooks", notebook_id)
 
-    def save_answer(self, owner, nid, question, result, history, answer_id=None):
+    def save_answer(
+        self, owner, nid, question, result, history, answer_id=None, conversation_id=None
+    ):
         answer_id = answer_id or identifier()
         existing = next((m for m in history["messages"] if m["id"] == answer_id), None)
         if existing:
@@ -358,10 +360,26 @@ class Services:
             + "\n"
             + "\n".join(f"{m['role']}: {m['text'][:200]}" for m in messages[:-100])
         )[-4000:]
+        first_user_message = next(
+            (message["text"] for message in messages if message["role"] == "user"),
+            "New chat",
+        )
+        title = history.get("title")
+        if not title or title == "New chat":
+            title = first_user_message.strip().splitlines()[0][:80] or "New chat"
         self.repo.put(
             owner,
             "conversations",
-            {**history, "messages": messages[-100:], "summary": summary},
+            {
+                **history,
+                "id": conversation_id or history.get("id") or nid,
+                "notebook": nid,
+                "title": title,
+                "created_at": history.get("created_at") or now(),
+                "updated_at": now(),
+                "messages": messages[-100:],
+                "summary": summary,
+            },
             expected=history.get("revision", 0),
         )
         return messages[-1]
@@ -370,9 +388,12 @@ class Services:
         parent = self.repo.get(owner, "notebooks", job["notebook"])
         if not parent or parent.get("deleting"):
             raise ValueError("This notebook is no longer available.")
-        history = self.repo.get(owner, "conversations", job["notebook"]) or {
-            "id": job["notebook"],
+        conversation_id = job.get("conversation_id") or job["notebook"]
+        history = self.repo.get(owner, "conversations", conversation_id) or {
+            "id": conversation_id,
             "notebook": job["notebook"],
+            "title": "New chat",
+            "created_at": now(),
             "messages": [],
         }
         if any(m["id"] == job["id"] for m in history["messages"]):
@@ -387,7 +408,13 @@ class Services:
             history["messages"],
         )
         self.save_answer(
-            owner, job["notebook"], job["question"], result, history, job["id"]
+            owner,
+            job["notebook"],
+            job["question"],
+            result,
+            history,
+            job["id"],
+            conversation_id=conversation_id,
         )
 
     def ai_for(self, owner):

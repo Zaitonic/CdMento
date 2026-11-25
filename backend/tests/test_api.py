@@ -318,6 +318,37 @@ def test_chat_uses_owned_sources_and_persists(env):
     )
 
 
+def test_chat_conversation_threads_are_isolated_and_deletable(env):
+    client, services, _ = env
+    notebook, source_id = seed(client, services)
+    base = f"/api/v1/notebooks/{notebook['id']}/conversations"
+    first = client.post(base).json()
+    second = client.post(base).json()
+    assert first["id"] != second["id"]
+
+    response = client.post(
+        f"/api/v1/notebooks/{notebook['id']}/messages",
+        json={
+            "question": "What does LAN mean?",
+            "source_ids": [source_id],
+            "conversation_id": first["id"],
+        },
+    )
+    assert response.status_code == 200
+    detail = client.get(f"{base}/{first['id']}").json()
+    assert len(detail["messages"]) == 2
+    assert detail["title"] == "What does LAN mean?"
+    assert client.get(f"{base}/{second['id']}").json()["messages"] == []
+    assert client.get(base).json()[0]["id"] == first["id"]
+
+    other = client.post("/api/v1/notebooks", json={"name": "Other"}).json()
+    assert client.get(
+        f"/api/v1/notebooks/{other['id']}/conversations/{first['id']}"
+    ).status_code == 404
+    assert client.delete(f"{base}/{first['id']}").status_code == 204
+    assert client.get(f"{base}/{first['id']}").status_code == 404
+
+
 def test_generation_cache_card_acceptance_and_fsrs_idempotence(env):
     client, services, _ = env
     n, _ = seed(client, services)
