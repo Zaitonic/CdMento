@@ -270,7 +270,7 @@ export default function AssistantPage() {
           References
         </button>
       </div>
-      <AIAccess ai={ai} />
+      <div className="assistant-ai-status"><AIAccess ai={ai} /></div>
       <div
         className={`assistant-workspace ${references ? "" : "references-hidden"}`}
       >

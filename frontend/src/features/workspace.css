@@ -2429,3 +2429,117 @@ body.sidebar-resizing * {
     font-size: 12px;
   }
 }
+
+/* Phone layouts: keep one useful workspace pane visible at a time. */
+@media (max-width: 600px) {
+  .source-mobile-tabs,
+  .notes-mobile-tabs,
+  .generation-mobile-toggle { display: flex; }
+
+  .source-mobile-tabs,
+  .notes-mobile-tabs {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    grid-column: 1 / -1;
+    gap: 6px;
+    padding: 8px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .source-mobile-tabs button,
+  .notes-mobile-tabs button {
+    flex: 1;
+    min-height: 44px;
+    border-radius: 9px;
+    color: var(--muted);
+  }
+  .source-mobile-tabs button.active,
+  .notes-mobile-tabs button.active {
+    background: var(--soft);
+    color: var(--primary);
+    font-weight: 700;
+  }
+
+  .source-studio {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+    overflow: visible;
+  }
+  .source-studio > .source-library,
+  .source-studio > .document-container,
+  .source-studio > .reviewer-panel { display: none; }
+  .source-studio[data-mobile-tab="library"] > .source-library,
+  .source-studio[data-mobile-tab="source"] > .document-container,
+  .source-studio[data-mobile-tab="reviewer"] > .reviewer-panel { display: block; }
+  .source-library { border: 0; padding: 14px; }
+  .source-items { max-height: none; overflow: visible; }
+  .document-container { min-height: 0; border: 0; }
+  .document-viewer { min-height: 0; }
+  .reviewer-panel { border: 0; padding: 18px 14px; }
+  .source-add { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+  .source-add > b, .source-add > small { width: 100%; }
+
+  .notes-screen .notes-layout { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; overflow: visible; }
+  .notes-screen .notes-list,
+  .notes-screen .note-editor { display: none; }
+  .notes-screen .notes-layout[data-mobile-view="list"] .notes-list,
+  .notes-screen .notes-layout[data-mobile-view="editor"] .note-editor { display: block; }
+  .notes-screen .notes-layout[data-mobile-view="list"] .notes-list { display: flex; flex-direction: column; border: 0; }
+  .notes-screen .notes-layout[data-mobile-view="editor"] .note-editor { min-height: 0; }
+  .notes-screen .writing-page { padding: 20px 16px; }
+  .notes-screen .writing-workspace { grid-template-columns: minmax(0, 1fr); }
+  .notes-screen .note-outline { display: block; }
+  .notes-screen .editor-toolbar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; }
+  .notes-screen .editor-toolbar span { margin-left: auto; }
+  .notes-screen .tiptap { min-height: 45dvh; padding: 18px 4px; }
+
+  .assistant-screen { flex: none; min-height: calc(100dvh - 150px); overflow: visible; }
+  .assistant-screen > .feature-heading { flex-direction: row; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .assistant-screen .feature-heading h1 { font-size: 19px; }
+  .assistant-screen .feature-heading p { display: none; }
+  .assistant-screen .assistant-ai-status { max-height: 54px; overflow: auto; font-size: 11px; }
+  .assistant-workspace { display: block; flex: none; min-height: 0; overflow: visible; border-radius: 14px; }
+  .assistant-conversation { min-height: 0; height: clamp(520px, 72dvh, 700px); padding: 12px; }
+  .live-chat-history { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .assistant-center { justify-content: flex-start; gap: 12px; padding: 12px 0; }
+  .assistant-center > p { max-width: 34ch; }
+  .assistant-prompts { max-width: none; }
+  .assistant-composer { position: sticky; bottom: max(8px, env(safe-area-inset-bottom)); z-index: 3; padding: 8px; }
+  .assistant-conversation .small-print { margin: 7px 0 0; }
+  .assistant-references { position: fixed; inset: auto 0 0; z-index: 60; max-height: 72dvh; overflow-y: auto; padding: 20px 18px calc(20px + env(safe-area-inset-bottom)); border: 1px solid var(--border); border-radius: 20px 20px 0 0; box-shadow: 0 -12px 40px #0002; }
+
+  .feature-screen { min-width: 0; }
+  .feature-heading { min-width: 0; }
+  .mentosearch-screen { width: 100%; max-width: none; margin: 0 0 32px; padding: 0; }
+  .notebook-grid { grid-template-columns: minmax(0, 1fr); }
+  .focus-layout { grid-template-columns: minmax(0, 1fr); }
+  .generation-mobile-toggle { width: 100%; min-height: 44px; justify-content: space-between; padding: 10px 14px; margin: 8px 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+  .generation-mobile-settings.closed { display: none; }
+  .generation-mobile-settings.open { display: block; }
+  .generation-toolbar { grid-template-columns: minmax(0, 1fr) minmax(96px, .65fr); align-items: start; }
+  .generation-toolbar > label { grid-template-rows: auto 44px; }
+  .generation-toolbar > label:nth-child(2) { grid-template-rows: auto 44px auto; }
+  .generation-toolbar > button { grid-column: 1 / -1; width: 100%; }
+  .generation-presets { margin-bottom: 8px; }
+  .flashcard-area { max-width: none; margin: 20px 0; }
+  .mindmaps-screen .mindmap { height: clamp(420px, 65dvh, 760px); min-height: 420px; }
+  .map-toolbar { gap: 8px; }
+  .map-toolbar > button { flex: 1; }
+  .source-study-actions { gap: 4px 10px; padding: 10px 12px; }
+}
+
+@media (max-width: 600px) {
+  .app { height: auto; min-height: 100dvh; overflow: visible; }
+  .shell, .content-layout { height: auto; min-height: 100dvh; overflow: visible; }
+  .content-layout main { min-height: calc(100dvh - 64px); overflow-x: hidden; overflow-y: visible; padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+  .content-layout { display: block; }
+  .sidebar:not(.mobile-open) { overflow: hidden; }
+}
+
+.source-mobile-tabs, .notes-mobile-tabs, .generation-mobile-toggle { display: none; }
+@media (max-width: 600px) {
+  .source-mobile-tabs, .notes-mobile-tabs, .generation-mobile-toggle { display: flex; }
+  .generation-toolbar > label:nth-child(2) { grid-template-rows: auto 44px auto; }
+}

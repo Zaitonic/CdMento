@@ -33,9 +33,11 @@ export function parsePages(value: string): number[] {
 export default function ReviewerPanel({
   source,
   onCitation,
+  onOpen,
 }: {
   source?: Source;
   onCitation: (citation: SourceCitation) => void;
+  onOpen?: () => void;
 }) {
   const a = useArtifacts("guide", source?.id);
   const navigate = useNavigate();
@@ -62,6 +64,7 @@ export default function ReviewerPanel({
           ? parsePages(range)
           : null;
       await a.generate({ source_ids: [source.id], pages, style });
+      onOpen?.();
     } catch (e: any) {
       toast.error(e.message);
     }
@@ -135,7 +138,7 @@ export default function ReviewerPanel({
           Saved reviewers
           <select
             value={a.active}
-            onChange={(e) => a.setActive(e.target.value)}
+          onChange={(e) => { a.setActive(e.target.value); onOpen?.(); }}
           >
             {a.items.map((r) => (
               <option key={r.id} value={r.id}>

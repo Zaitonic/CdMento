@@ -110,6 +110,7 @@ export function useArtifacts(kind: string, sourceId?: string) {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(true);
   const mounted = useRef(true);
   const lastRequest = useRef<Record<string, unknown>>({});
   const hasGenerated = useRef(false);
@@ -268,6 +269,7 @@ export function useArtifacts(kind: string, sourceId?: string) {
       if (mounted.current) {
         await reload();
         setActive(response.artifact_id);
+        setSettingsOpen(false);
         setProgress("");
       }
       return response.artifact_id as string;
@@ -291,6 +293,8 @@ export function useArtifacts(kind: string, sourceId?: string) {
   const controls = (
     <>
       <AIAccess ai={ai} />
+      <button className="generation-mobile-toggle" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}>{settingsOpen ? "Hide generator" : "Generate or adjust"}</button>
+      <div className={`generation-mobile-settings ${settingsOpen ? "open" : "closed"}`}>
       <div className="generation-toolbar">
         <label>
           Topic
@@ -347,6 +351,7 @@ export function useArtifacts(kind: string, sourceId?: string) {
             {value}
           </button>
         ))}
+      </div>
       </div>
       {progress && (
         <p className="generation-progress" role="status">

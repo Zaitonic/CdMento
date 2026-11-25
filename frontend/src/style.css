@@ -2814,3 +2814,12 @@ progress {
     padding-bottom: max(32px, env(safe-area-inset-bottom, 0px));
   }
 }
+@media (max-width: 600px) {
+  .workspace-shell, .home-screen, .notebooks-screen, .focus-screen { min-width: 0; width: 100%; }
+  .home-screen, .notebooks-screen, .focus-screen, .chat-screen, .flashcards-screen, .quizzes-screen, .mindmaps-screen { overflow-wrap: anywhere; }
+  .header-right { min-width: 0; }
+  .breadcrumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .content-layout main { width: 100%; min-width: 0; }
+  .notebook-grid { grid-template-columns: minmax(0, 1fr); }
+  .search-container, .search-form { min-width: 0; }
+}

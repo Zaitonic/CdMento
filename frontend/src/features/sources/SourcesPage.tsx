@@ -69,10 +69,12 @@ export default function SourcesPage({
   const [name, setName] = useState("");
   const [remove, setRemove] = useState(false);
   const [showReviewer, setShowReviewer] = useState(true);
+  const [mobileStudioTab, setMobileStudioTab] = useState<"library" | "source" | "reviewer">("library");
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     select(params.get("source") || "");
+    if (params.get("source")) setMobileStudioTab("source");
     setPdfPage(Math.max(1, Number(params.get("page")) || 1));
     setQuery("");
   }, [s.active]);
@@ -238,7 +240,12 @@ export default function SourcesPage({
         accept=".pdf,.docx,.txt"
         onChange={(e) => upload(Array.from(e.target.files || []))}
       />
-      <div className={`source-studio ${showReviewer ? "" : "reviewer-hidden"}`}>
+      <div className={`source-studio ${showReviewer ? "" : "reviewer-hidden"}`} data-mobile-tab={mobileStudioTab}>
+        <nav className="source-mobile-tabs" aria-label="Source studio sections">
+          {([["library", "Library"], ["source", "Source"], ["reviewer", "Reviewer"]] as const).map(([value, label]) => (
+            <button key={value} className={mobileStudioTab === value ? "active" : ""} onClick={() => { setMobileStudioTab(value); if (value === "reviewer") setShowReviewer(true); }}>{label}</button>
+          ))}
+        </nav>
         <aside className="source-library">
           <div className="studio-label">
             <Files size={17} />
@@ -318,6 +325,7 @@ export default function SourcesPage({
                   key={f.id}
                   onClick={() => {
                     select(f.id);
+                    setMobileStudioTab("source");
                     setPdfPage(1);
                     setTab(f.type === "pdf" ? "document" : "text");
                   }}
@@ -378,7 +386,7 @@ export default function SourcesPage({
                 className="icon-button"
                 aria-label="Toggle reviewer panel"
                 aria-expanded={showReviewer}
-                onClick={() => setShowReviewer(!showReviewer)}
+                onClick={() => { setShowReviewer(!showReviewer); setMobileStudioTab("reviewer"); }}
               >
                 <PanelRight size={17} />
               </button>
@@ -623,6 +631,7 @@ export default function SourcesPage({
         {showReviewer && (
           <ReviewerPanel
             source={source}
+            onOpen={() => setMobileStudioTab("reviewer")}
             onCitation={(c) => {
               select(c.source_id);
               setPdfPage(c.page || 1);

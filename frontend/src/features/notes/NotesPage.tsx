@@ -92,7 +92,8 @@ export default function Notes() {
   const [params] = useSearchParams();
   const requestedNote = params.get("note");
   const [id, setId] = useState(requestedNote || notes[0]?.id || "");
-  useEffect(() => { if (requestedNote) setId(requestedNote); }, [requestedNote]);
+  const [mobileView, setMobileView] = useState<"list" | "editor">(requestedNote ? "editor" : "list");
+  useEffect(() => { if (requestedNote) { setId(requestedNote); setMobileView("editor"); } }, [requestedNote]);
   // Do not temporarily fall back to the first note while a deep-linked note
   // is still loading. That fallback can mount an empty editor and autosave it
   // over the requested note before the workspace hydration finishes.
@@ -143,7 +144,11 @@ export default function Notes() {
         title="A space for your thoughts"
         desc="Write it down. Make it yours."
       />
-      <div className="notes-layout">
+      <div className="notes-layout" data-mobile-view={mobileView}>
+        <nav className="notes-mobile-tabs" aria-label="Notes sections">
+          <button className={mobileView === "list" ? "active" : ""} onClick={() => setMobileView("list")}>Notes</button>
+          {note && <button className={mobileView === "editor" ? "active" : ""} onClick={() => setMobileView("editor")}>Editor</button>}
+        </nav>
         <div className="notes-list">
           <button
             className="primary"
@@ -161,6 +166,7 @@ export default function Notes() {
                 ],
               });
               setId(newId);
+              setMobileView("editor");
             }}
           >
             <Plus size={17} />
@@ -170,7 +176,7 @@ export default function Notes() {
             <button
               className={note?.id === n.id ? "active" : ""}
               key={n.id}
-              onClick={() => setId(n.id)}
+              onClick={() => { setId(n.id); setMobileView("editor"); }}
             >
               <NotebookPen size={17} />
               {n.title}
