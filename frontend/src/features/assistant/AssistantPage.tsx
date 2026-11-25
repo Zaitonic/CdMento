@@ -66,9 +66,11 @@ export default function AssistantPage() {
   const [error, setError] = useState("");
   const [retryAt, setRetryAt] = useState(0);
   const [citation, setCitation] = useState<Citation | null>(null);
+  const [mobileReferencesOpen, setMobileReferencesOpen] = useState(false);
   const end = useRef<HTMLDivElement>(null);
   const active = useRef(true);
   const sources = s.sources.filter((x) => x.notebook === s.active);
+  const readySources = sources.filter((source) => source.status === "ready").length;
   useEffect(() => {
     active.current = true;
     setMessages([]);
@@ -255,6 +257,49 @@ export default function AssistantPage() {
   }
   return (
     <section className="feature-screen assistant-screen">
+      <div className="mobile-reference-desk">
+        <button
+          className="mobile-reference-toggle"
+          aria-expanded={mobileReferencesOpen}
+          onClick={() => setMobileReferencesOpen((open) => !open)}
+        >
+          <span>Study sources · {readySources} ready</span>
+          <span aria-hidden="true">{mobileReferencesOpen ? "⌃" : "⌄"}</span>
+        </button>
+        {mobileReferencesOpen && (
+          <div className="mobile-reference-content">
+            <div className="mobile-reference-heading">
+              <div>
+                <strong>Reference desk</strong>
+                <small>Documents in your active notebook</small>
+              </div>
+              <button
+                className="icon-button"
+                aria-label="Close references"
+                onClick={() => setMobileReferencesOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            {sources.map((source) => (
+              <button
+                className="mobile-reference-source"
+                key={source.id}
+                onClick={() =>
+                  navigate(`/sources?source=${encodeURIComponent(source.id)}`)
+                }
+              >
+                <BookOpen size={16} />
+                <span>{source.name}<small>{source.status}</small></span>
+              </button>
+            ))}
+            {!sources.length && <p>No sources added yet.</p>}
+            <button className="secondary" onClick={() => navigate("/sources")}>
+              Manage sources
+            </button>
+          </div>
+        )}
+      </div>
       <div className="feature-heading">
         <div>
           <span className="eyebrow">YOUR THINKING PARTNER</span>
