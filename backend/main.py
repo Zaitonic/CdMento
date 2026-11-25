@@ -19,6 +19,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fsrs import Scheduler, Card, Rating
 from .config import settings
@@ -79,8 +80,21 @@ def create_services(config):
     )
 
 
-def user(request: Request):
+def user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(
+        HTTPBearer(auto_error=False)
+    ),
+):
     config = request.app.state.services.settings
+    authorization = request.headers.get("authorization", "")
+    token = (
+        credentials.credentials
+        if isinstance(credentials, HTTPAuthorizationCredentials)
+        else authorization[7:]
+        if authorization.startswith("Bearer ")
+        else ""
+    )
     if config.auth_mode == "local":
         if request.client and request.client.host not in (
             "127.0.0.1",
@@ -88,17 +102,15 @@ def user(request: Request):
             "testclient",
         ):
             raise HTTPException(403, "Local mode only accepts loopback connections.")
-        authorization = request.headers.get("authorization", "")
         if authorization:
             if not authorization.startswith("Bearer "):
                 raise HTTPException(401, "Sign in to your demo account again.")
-            return request.app.state.demo_auth.resolve(authorization[7:])
+            return request.app.state.demo_auth.resolve(token)
         return "local-workspace"
-    token = request.headers.get("authorization", "")
-    if not token.startswith("Bearer "):
+    if not authorization.startswith("Bearer "):
         raise HTTPException(401, "Sign in to your account to continue.")
     if config.auth_mode == "google":
-        session_token = token[7:]
+        session_token = token
         if session_token.startswith("account_"):
             claims = request.app.state.password_auth.resolve(session_token)
         else:
@@ -108,7 +120,7 @@ def user(request: Request):
     try:
         from firebase_admin import auth
 
-        claims = auth.verify_id_token(token[7:], check_revoked=True)
+        claims = auth.verify_id_token(token, check_revoked=True)
     except Exception:
         raise HTTPException(
             401, "Your session expired. Please sign in again."
@@ -166,7 +178,33 @@ def create_app(config=None, services=None):
         if service.worker:
             service.worker.join(timeout=3)
 
-    app = FastAPI(title="CdMento API", version="1.0.0", lifespan=lifespan)
+    api_tags = [
+        {"name": "Diagnostics", "description": "Health and service readiness checks."},
+        {"name": "Authentication", "description": "Sign-in, account verification, and session endpoints."},
+        {"name": "Profile", "description": "Current account and profile settings."},
+        {"name": "Workspace", "description": "Workspace data and backup import/export."},
+        {"name": "Notebooks", "description": "Notebook creation and management."},
+        {"name": "Sources", "description": "Source uploads, extracted content, and processing."},
+        {"name": "Jobs", "description": "Background job status and retries."},
+        {"name": "Notes", "description": "Personal notes and reviewer export."},
+        {"name": "Study Tools", "description": "AI generation, chat, flashcards, quizzes, and mind maps."},
+        {"name": "Focus", "description": "Focus sessions and study tasks."},
+        {"name": "Feedback", "description": "Feedback submitted by workspace users."},
+        {"name": "Admin", "description": "Administrative users, activity, support, and system operations."},
+    ]
+    app = FastAPI(
+        title="CdMento — A Place to Understand",
+        description=(
+            "Welcome to the CdMento backend API. CdMento helps students make "
+            "course material easier to understand through organized sources, "
+            "clear notes, AI-powered study tools, and focused practice. "
+            "Use these endpoints to connect the CdMento app with its workspace, "
+            "learning, and account services."
+        ),
+        version="1.0.0",
+        lifespan=lifespan,
+        openapi_tags=api_tags,
+    )
     app.state.services = service
     app.state.scholar = ScholarSearch(service.settings.semantic_scholar_api_key)
     app.state.demo_auth = DemoAuth(repo)
@@ -2984,6 +3022,45 @@ def create_app(config=None, services=None):
             "max_upload_mb": service.settings.max_upload_bytes // (1024 * 1024),
             "admin_emails": [e.strip() for e in getattr(service.settings, "admin_emails", "").split(",") if e.strip()],
         }
+
+    def route_tag(path):
+        if path == "/api/v1/health":
+            return "Diagnostics"
+        if path.startswith("/api/v1/auth/"):
+            return "Authentication"
+        if path.startswith("/api/v1/me"):
+            return "Profile"
+        if path.startswith("/api/v1/workspace"):
+            return "Workspace"
+        if path.startswith("/api/v1/notebooks"):
+            if "/sources" in path:
+                return "Sources"
+            if "/notes" in path or "/conversation" in path or path.endswith(("/messages", "/generations", "/artifacts", "/jobs", "/mind-map", "/decks", "/quizzes")):
+                if "/notes" in path:
+                    return "Notes"
+                if "/jobs" in path:
+                    return "Jobs"
+                return "Study Tools"
+            return "Notebooks"
+        if path.startswith("/api/v1/sources"):
+            return "Sources"
+        if path.startswith("/api/v1/jobs"):
+            return "Jobs"
+        if path.startswith("/api/v1/notes") or path.endswith("/save-note"):
+            return "Notes"
+        if path.startswith(("/api/v1/decks", "/api/v1/quizzes", "/api/v1/attempts", "/api/v1/search", "/api/v1/ai/")) or path.endswith(("/artifacts", "/mind-map")) or path.startswith("/api/v1/messages"):
+            return "Study Tools"
+        if path.startswith(("/api/v1/focus-sessions", "/api/v1/tasks")):
+            return "Focus"
+        if path.startswith("/api/v1/feedback"):
+            return "Feedback"
+        if path.startswith("/api/v1/admin/"):
+            return "Admin"
+        return "Workspace"
+
+    for route in app.routes:
+        if getattr(route, "path", "").startswith("/api/v1/") and hasattr(route, "tags"):
+            route.tags = [route_tag(route.path)]
 
     return app
 

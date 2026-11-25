@@ -583,6 +583,24 @@ def test_firebase_missing_invalid_and_valid_tokens(env, monkeypatch):
     )
 
 
+def test_swagger_documents_optional_http_bearer_for_protected_routes(env):
+    _, _, app = env
+    schema = app.openapi()
+    security_schemes = schema["components"]["securitySchemes"]
+    assert security_schemes["HTTPBearer"] == {"type": "http", "scheme": "bearer"}
+    assert {"HTTPBearer": []} in schema["paths"]["/api/v1/me"]["get"]["security"]
+    assert "security" not in schema["paths"]["/api/v1/health"]["get"]
+
+
+def test_local_auth_keeps_anonymous_and_malformed_header_behavior(env):
+    client, _, app = env
+    app.dependency_overrides.clear()
+    assert client.get("/api/v1/me").json()["id"] == "local-workspace"
+    response = client.get("/api/v1/me", headers={"Authorization": "Basic invalid"})
+    assert response.status_code == 401
+    assert response.json()["error"] == "Sign in to your demo account again."
+
+
 def test_local_mode_rejects_cross_origin(env):
     client, _, _ = env
     assert (

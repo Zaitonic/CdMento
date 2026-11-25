@@ -1,0 +1,240 @@
+{
+  "info": {
+    "_postman_id": "b3215592-e67d-40e3-8de9-63c1246310d6",
+    "name": "CdMento Capstone Defense Protocol",
+    "description": "Five-step defense flow: health, AI status, missing-token 401, then create, read, update, and delete a Firestore-capable workspace task. Import CdMento_Local.postman_environment.json first. Leave bearerToken empty for local mode; set it to a valid access token for authenticated deployments.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Health and AI Status",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/health",
+            "description": "Public API readiness check."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Health returns 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Health reports status', function () { pm.expect(pm.response.json().status).to.eql('ok'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AI Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/ai/status",
+            "description": "Reports configured AI providers. Uses bearerToken when one is supplied; local mode can use its local workspace without a token."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const token = pm.environment.get('bearerToken');",
+                  "if (token) pm.request.headers.upsert({ key: 'Authorization', value: 'Bearer ' + token });",
+                  "else pm.request.headers.remove('Authorization');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AI status returns 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('AI status response is JSON', function () { pm.expect(pm.response.json()).to.be.an('object'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Protected Route Without Bearer (expect 401)",
+      "item": [
+        {
+          "name": "Demo Session Without Authorization",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "noauth" },
+            "url": "{{baseUrl}}/api/v1/auth/demo/session",
+            "description": "Local-only protected session route. With no Authorization header, local mode returns 401."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Missing Bearer token returns 401', function () { pm.response.to.have.status(401); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Firestore-Capable Task CRUD",
+      "description": "Uses TaskInput (text required, done defaults to false) and the repository configured by the backend. Run requests in order.",
+      "item": [
+        {
+          "name": "Create Task",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"{{taskText}}\",\n  \"done\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/v1/tasks"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const token = pm.environment.get('bearerToken');",
+                  "if (token) pm.request.headers.upsert({ key: 'Authorization', value: 'Bearer ' + token });",
+                  "else pm.request.headers.remove('Authorization');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Task created', function () { pm.response.to.have.status(201); });",
+                  "const task = pm.response.json();",
+                  "pm.expect(task.id).to.be.a('string').and.not.empty;",
+                  "pm.environment.set('taskId', task.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read Task List",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/tasks"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const token = pm.environment.get('bearerToken');",
+                  "if (token) pm.request.headers.upsert({ key: 'Authorization', value: 'Bearer ' + token });",
+                  "else pm.request.headers.remove('Authorization');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Task list contains the created task', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const tasks = pm.response.json();",
+                  "  pm.expect(tasks.some(function (task) { return task.id === pm.environment.get('taskId'); })).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Partially Update Task Text",
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"{{updatedTaskText}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/v1/tasks/{{taskId}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const token = pm.environment.get('bearerToken');",
+                  "if (token) pm.request.headers.upsert({ key: 'Authorization', value: 'Bearer ' + token });",
+                  "else pm.request.headers.remove('Authorization');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Task updated', function () { pm.response.to.have.status(200); });",
+                  "pm.expect(pm.response.json().text).to.eql(pm.environment.get('updatedTaskText'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Task",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/tasks/{{taskId}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const token = pm.environment.get('bearerToken');",
+                  "if (token) pm.request.headers.upsert({ key: 'Authorization', value: 'Bearer ' + token });",
+                  "else pm.request.headers.remove('Authorization');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Task deleted', function () { pm.response.to.have.status(204); });",
+                  "pm.environment.unset('taskId');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "event": []
+}
