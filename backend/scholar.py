@@ -37,8 +37,13 @@ EVIDENCE_SOURCES = (
     "arxiv",
     "pubmed",
     "semantic",
+    "google_scholar",
 )
 DEFAULT_EVIDENCE_SOURCES = ("crossref", "openalex", "europepmc")
+
+
+class GoogleScholarNotConfigured(ValueError):
+    pass
 
 _PROVIDERS = {
     "semantic": (
@@ -88,6 +93,8 @@ _ACRONYMS = {
 
 
 def _expand_query(query):
+    if query.strip().casefold() == "it":
+        return "information technology"
     return re.sub(
         r"\b[A-Z][A-Z0-9]{1,4}\b",
         lambda match: _ACRONYMS.get(match.group(0), match.group(0)),
@@ -434,6 +441,93 @@ def _fetch_semantic(client, query, api_key="", year_from=None, year_to=None):
     return [r for r in records if r]
 
 
+def _fetch_google_scholar(client, query, serpapi_key, serper_key, year_from=None, year_to=None, sort="relevance"):
+    if not (serpapi_key or serper_key):
+        raise GoogleScholarNotConfigured(
+            "Google Scholar requires SERPAPI_API_KEY or SERPER_API_KEY"
+        )
+
+    def request(from_year, to_year):
+        args = {"q": query, "as_ylo": from_year, "as_yhi": to_year}
+        last_error = None
+        if serpapi_key:
+            params = {"engine": "google_scholar", "api_key": serpapi_key, **args}
+            if sort == "newest":
+                params["scisbd"] = 1
+            try:
+                response = _get(client, "https://serpapi.com/search.json", params=params)
+                return response.json().get("organic_results", [])
+            except (httpx.HTTPStatusError, httpx.TransportError) as error:
+                last_error = error
+        if serper_key:
+            try:
+                response = client.post(
+                    "https://google.serper.dev/scholar",
+                    json={key: value for key, value in args.items() if value is not None},
+                    headers={"X-API-KEY": serper_key},
+                )
+                response.raise_for_status()
+                body = response.json()
+                return body.get("organic", body.get("organic_results", []))
+            except (httpx.HTTPStatusError, httpx.TransportError) as error:
+                last_error = error
+        raise last_error or RuntimeError("Google Scholar search failed.")
+
+    try:
+        items = request(year_from, year_to)
+    except httpx.HTTPStatusError as error:
+        if not (year_from or year_to) or error.response.status_code not in (400, 422):
+            raise
+        items = request(None, None)
+
+    records = []
+    for item in items:
+        publication = item.get("publication_info") or item.get("publicationInfo") or {}
+        authors_data = publication.get("authors") or item.get("authors") or []
+        authors = [
+            author.get("name", "") if isinstance(author, dict) else str(author)
+            for author in authors_data
+        ]
+        summary = publication.get("summary", "")
+        year = item.get("year") or _year(summary)
+        cited_by = item.get("inline_links", {}).get("cited_by", {})
+        if not isinstance(cited_by, dict):
+            cited_by = {}
+        record = _record(
+            "google_scholar",
+            item.get("title"),
+            item.get("link") or item.get("url", ""),
+            authors=authors,
+            year=_year(year),
+            venue=publication.get("venue") or summary,
+            abstract=item.get("snippet", ""),
+            citations=cited_by.get("total") or item.get("cited_by"),
+        )
+        if record:
+            records.append(record)
+    if sort == "newest":
+        records.sort(key=lambda record: record["year"] or 0, reverse=True)
+    return [record for record in records if _in_year_range(record, year_from, year_to)]
+
+
+def _in_year_range(record, year_from, year_to):
+    year = record.get("year")
+    return (
+        (year_from is None or year is not None and year >= year_from)
+        and (year_to is None or year is not None and year <= year_to)
+    )
+
+
+def _fetch_evidence_with_year_fallback(fetcher, client, query, api_key, year_from, year_to):
+    try:
+        return fetcher(client, query, api_key, year_from, year_to)
+    except httpx.HTTPStatusError as error:
+        if not (year_from or year_to) or error.response.status_code not in (400, 422):
+            raise
+        records = fetcher(client, query, api_key, None, None)
+        return [record for record in records if _in_year_range(record, year_from, year_to)]
+
+
 _FETCHERS = {
     "crossref": _fetch_crossref,
     "openalex": _fetch_openalex,
@@ -533,8 +627,13 @@ def _rank(records, query, sort):
     return [record for record in ranked if relevant(record)]
 
 
-def _scholar_url(title):
-    return "https://scholar.google.com/scholar?q=" + quote(title)
+def _scholar_url(title, year_from=None, year_to=None):
+    url = "https://scholar.google.com/scholar?q=" + quote(title)
+    if year_from is not None:
+        url += f"&as_ylo={year_from}"
+    if year_to is not None:
+        url += f"&as_yhi={year_to}"
+    return url
 
 
 def _bounded_response(response):
@@ -555,20 +654,49 @@ def _bounded_response(response):
 
 
 class ScholarSearch:
-    def __init__(self, api_key="", transport=None):
+    def __init__(self, api_key="", transport=None, serpapi_api_key="", serper_api_key=""):
         self.api_key = api_key
+        self.serpapi_api_key = serpapi_api_key
+        self.serper_api_key = serper_api_key
         self._transport = transport
 
     @property
     def sources(self):
-        return tuple(_PROVIDERS)
+        return tuple(dict.fromkeys((*_PROVIDERS, *EVIDENCE_SOURCES)))
 
     @property
     def evidence_sources(self):
         return EVIDENCE_SOURCES
 
-    def fetch(self, source, query, year_from=None, year_to=None):
+    def fetch(self, source, query, year_from=None, year_to=None, sort="relevance"):
         """Return (body, media_type) for one allow-listed scholarly source."""
+        if source in {"crossref", "openalex", "europepmc", "pubmed"}:
+            result = self.evidence(query, [source], sort, year_from, year_to)
+            names = {
+                "crossref": "Crossref", "openalex": "OpenAlex",
+                "europepmc": "Europe PMC", "pubmed": "PubMed",
+            }
+            papers = [{
+                **record,
+                "id": f"{source}-{record['id']}",
+                "sourceId": source,
+                "sourceName": names[source],
+                "rank": index,
+            } for index, record in enumerate(result["evidence"])]
+            return json.dumps({"data": papers}).encode(), "application/json"
+        if source == "google_scholar":
+            query = _clean_query(query)
+            with httpx.Client(
+                timeout=httpx.Timeout(20, connect=5),
+                follow_redirects=True,
+                headers={"User-Agent": USER_AGENT},
+                transport=self._transport,
+            ) as client:
+                records = _fetch_google_scholar(
+                    client, query, self.serpapi_api_key, self.serper_api_key,
+                    year_from, year_to, sort,
+                )
+            return json.dumps({"data": records}).encode(), "application/json"
         try:
             base, media_type = _PROVIDERS[source]
         except KeyError:
@@ -583,36 +711,43 @@ class ScholarSearch:
             headers=headers,
             transport=self._transport,
         ) as client:
-            if source == "semantic" and (year_from or year_to):
-                url = base + quote(query, safe="") + f"&year={year_from or 1900}-{year_to or 2200}"
-            elif source == "arxiv" and (year_from or year_to):
-                date_query = f"({query}) AND submittedDate:[{year_from or 1900}01010000 TO {year_to or 2200}12312359]"
-                url = base + quote(date_query, safe="")
-            else:
-                url = base + quote(query, safe="")
-            # The public pools throttle bursts; short retries avoid most
-            # transient 429/503 responses without a long user-visible wait.
-            for attempt in range(ATTEMPTS):
-                response = client.get(url)
-                if response.status_code not in RETRIES or attempt == ATTEMPTS - 1:
-                    response.raise_for_status()
-                    body = response.content
-                    if year_from or year_to:
-                        if source == "semantic":
-                            data = response.json()
-                            data["data"] = [paper for paper in data.get("data", []) if isinstance(paper.get("year"), int) and (year_from is None or paper["year"] >= year_from) and (year_to is None or paper["year"] <= year_to)]
-                            body = json.dumps(data).encode()
-                        else:
-                            root = ET.fromstring(response.content)
-                            for entry in root.findall("a:entry", _ATOM):
-                                year = _year(entry.findtext("a:published", default="", namespaces=_ATOM))
-                                if year is None or (year_from is not None and year < year_from) or (year_to is not None and year > year_to):
-                                    root.remove(entry)
-                            body = ET.tostring(root, encoding="utf-8", xml_declaration=True)
-                    return body, media_type
-                time.sleep(2)
+            def request(from_year, to_year):
+                if source == "semantic" and (from_year or to_year):
+                    url = base + quote(query, safe="") + f"&year={from_year or 1900}-{to_year or 2200}"
+                elif source == "arxiv" and (from_year or to_year):
+                    date_query = f"({query}) AND submittedDate:[{from_year or 1900}01010000 TO {to_year or 2200}12312359]"
+                    url = base + quote(date_query, safe="")
+                else:
+                    url = base + quote(query, safe="")
+                for attempt in range(ATTEMPTS):
+                    response = client.get(url)
+                    if response.status_code not in RETRIES or attempt == ATTEMPTS - 1:
+                        response.raise_for_status()
+                        return response
+                    time.sleep(2)
 
-    def evidence(self, query, sources=None, sort="relevance", year_from=None, year_to=None):
+            try:
+                response = request(year_from, year_to)
+            except httpx.HTTPStatusError as error:
+                if not (year_from or year_to) or error.response.status_code not in (400, 422):
+                    raise
+                response = request(None, None)
+            body = response.content
+            if year_from or year_to:
+                if source == "semantic":
+                    data = response.json()
+                    data["data"] = [paper for paper in data.get("data", []) if _in_year_range({"year": paper.get("year")}, year_from, year_to)]
+                    body = json.dumps(data).encode()
+                else:
+                    root = ET.fromstring(response.content)
+                    for entry in root.findall("a:entry", _ATOM):
+                        year = _year(entry.findtext("a:published", default="", namespaces=_ATOM))
+                        if not _in_year_range({"year": year}, year_from, year_to):
+                            root.remove(entry)
+                    body = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+            return body, media_type
+
+    def evidence(self, query, sources=None, sort="relevance", year_from=None, year_to=None, papers=None):
         """Retrieve, normalize, dedupe, and rank evidence from every source."""
         query = _clean_query(query)
         search_query = _expand_query(query)
@@ -623,6 +758,24 @@ class ScholarSearch:
         ]
         if not chosen:
             raise ValueError("Choose at least one search source.")
+        if papers is not None:
+            records = []
+            for paper in papers:
+                record = _record(
+                    paper["source"], paper["title"], paper.get("url", ""),
+                    authors=paper.get("authors", []), year=paper.get("year"),
+                    venue=paper.get("venue", ""), doi=paper.get("doi", ""),
+                    abstract=paper.get("abstract", ""), citations=paper.get("citations"),
+                )
+                if record and _in_year_range(record, year_from, year_to):
+                    record["id"] = paper["id"]
+                    records.append(record)
+            records = _dedupe(records)
+            for record in records:
+                record["scholar_url"] = _scholar_url(record["title"], year_from, year_to)
+            chosen = list(dict.fromkeys(record["source"] for record in records)) or chosen
+            return {"evidence": records, "coverage": {"ok": chosen, "failed": []}}
+
         records, failed = [], []
         with httpx.Client(
             timeout=httpx.Timeout(EVIDENCE_TIMEOUT, connect=5),
@@ -631,12 +784,18 @@ class ScholarSearch:
             transport=self._transport,
         ) as client:
             with ThreadPoolExecutor(max_workers=len(chosen)) as pool:
-                futures = {
-                    source: pool.submit(
-                        _FETCHERS[source], client, search_query, self.api_key, year_from, year_to
+                def fetch_source(source):
+                    if source == "google_scholar":
+                        return _fetch_google_scholar(
+                            client, search_query, self.serpapi_api_key,
+                            self.serper_api_key, year_from, year_to, sort,
+                        )
+                    return _fetch_evidence_with_year_fallback(
+                        _FETCHERS[source], client, search_query, self.api_key,
+                        year_from, year_to,
                     )
-                    for source in chosen
-                }
+
+                futures = {source: pool.submit(fetch_source, source) for source in chosen}
                 # Read results in requested source order so dedupe and ranking
                 # stay deterministic regardless of which host answers first.
                 for source in chosen:
@@ -644,11 +803,11 @@ class ScholarSearch:
                         records.extend(futures[source].result())
                     except Exception:
                         failed.append(source)
-        records = [record for record in records if (year_from is None or record["year"] is not None and record["year"] >= year_from) and (year_to is None or record["year"] is not None and record["year"] <= year_to)]
+        records = [record for record in records if _in_year_range(record, year_from, year_to)]
         records = _rank(_dedupe(records), search_query, sort)[:MAX_EVIDENCE]
         for index, record in enumerate(records, 1):
             record["id"] = f"ev-{index}"
-            record["scholar_url"] = _scholar_url(record["title"])
+            record["scholar_url"] = _scholar_url(record["title"], year_from, year_to)
         return {
             "evidence": records,
             "coverage": {

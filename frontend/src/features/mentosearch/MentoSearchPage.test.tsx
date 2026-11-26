@@ -13,6 +13,13 @@ vi.mock("../../lib/api", () => ({
 vi.mock("./searchProviders", () => ({
   SOURCES: [
     {
+      id: "google_scholar",
+      name: "Google Scholar",
+      description: "Server-side academic search",
+      defaultEnabled: false,
+      search: vi.fn(),
+    },
+    {
       id: "alpha",
       name: "Alpha",
       description: "First test source",
@@ -113,6 +120,7 @@ describe("MentoSearch page", () => {
     await user.click(screen.getByRole("button", { name: /Advanced sources/ }));
     const alpha = screen.getByRole("button", { name: /Alpha/ });
     const beta = screen.getByRole("button", { name: /Beta/ });
+    expect(screen.getByRole("button", { name: /Google Scholar/ })).toBeTruthy();
     expect(alpha.getAttribute("aria-pressed")).toBe("true");
     expect(beta.getAttribute("aria-pressed")).toBe("false");
 
@@ -125,7 +133,17 @@ describe("MentoSearch page", () => {
 
   it("requests a topic brief and renders the answer with citations", async () => {
     const user = userEvent.setup();
-    render(<MentoSearchPage />);
+    const matchedPaper = {
+      ...paper,
+      id: "ev-1",
+      title: "Information technology fundamentals",
+      url: "https://example.org/it",
+      year: 2023,
+      doi: "10.1/it",
+      abstract: "A study of IT fundamentals.",
+    };
+    vi.mocked(runMentoSearch).mockResolvedValue({ results: [matchedPaper], failedSources: [], succeededCount: 1 });
+    const { container } = render(<MentoSearchPage />);
     await search(user);
     await user.click(await screen.findByRole("tab", { name: /Answer/ }));
 
@@ -137,13 +155,10 @@ describe("MentoSearch page", () => {
       screen.getAllByRole("button", { name: "Show evidence 1" }).length,
     ).toBeGreaterThan(0);
     expect(
-      screen.getByRole("link", { name: "Verify on Google Scholar" }).getAttribute("href"),
-    ).toBe(
-      "https://scholar.google.com/scholar?q=Information%20technology%20fundamentals",
-    );
-    expect(
-      screen.getByRole("link", { name: "Open in Google Scholar" }).getAttribute("href"),
-    ).toContain("scholar.google.com/scholar?q=IT%20fundamentals");
+      new URL(screen.getByRole("link", { name: "Verify on Google Scholar" }).getAttribute("href")!).searchParams.get("q"),
+    ).toBe("Information technology fundamentals");
+    expect(new URL(screen.getByRole("link", { name: "Open in Google Scholar" }).getAttribute("href")!).searchParams.get("q"))
+      .toBe("IT fundamentals");
 
     expect(searchBrief).toHaveBeenCalledTimes(1);
     const [query, sources, sort, signal] = vi.mocked(searchBrief).mock.calls[0];
@@ -151,6 +166,9 @@ describe("MentoSearch page", () => {
     expect(sources).toEqual(["alpha"]);
     expect(sort).toBe("relevance");
     expect(signal).toBeInstanceOf(AbortSignal);
+    expect(vi.mocked(searchBrief).mock.calls[0][7]).toEqual([matchedPaper]);
+    expect(screen.getByRole("button", { name: "Copy citation" })).toBeTruthy();
+    expect(container.querySelector(".citation-block p")?.textContent).toContain("Ada Lovelace, Grace Hopper (2023)");
   });
 
   it("highlights the evidence card when a citation is clicked", async () => {
@@ -267,6 +285,54 @@ describe("MentoSearch page", () => {
     await user.click(await screen.findByRole("button", { name: `Since ${new Date().getFullYear() - 1}` }));
     const calls = vi.mocked(runMentoSearch).mock.calls;
     expect(calls[calls.length - 1][4]).toBe(new Date().getFullYear() - 1);
+  });
+
+  it("keeps Papers first and selected by default", async () => {
+    const user = userEvent.setup();
+    vi.mocked(runMentoSearch).mockResolvedValue({ results: [paper], failedSources: [], succeededCount: 1 });
+    render(<MentoSearchPage />);
+    await search(user);
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs[0].textContent).toContain("Papers");
+    expect(tabs[0].getAttribute("aria-selected")).toBe("true");
+    expect(tabs[1].textContent).toContain("Answer");
+  });
+
+  it("does not issue a request when a year preset is selected with an empty query", async () => {
+    const user = userEvent.setup();
+    render(<MentoSearchPage />);
+    await user.click(screen.getByRole("button", { name: "Since 2023" }));
+    expect(runMentoSearch).not.toHaveBeenCalled();
+    expect(searchBrief).not.toHaveBeenCalled();
+  });
+
+  it("applies a custom year range and syncs it to Google Scholar links", async () => {
+    const user = userEvent.setup();
+    vi.mocked(runMentoSearch).mockResolvedValue({ results: [paper], failedSources: [], succeededCount: 1 });
+    render(<MentoSearchPage />);
+    await search(user);
+    await user.click(screen.getByRole("button", { name: "Custom range ▾" }));
+    await user.type(screen.getByRole("textbox", { name: "From year" }), "2020");
+    await user.type(screen.getByRole("textbox", { name: "To year" }), "2025");
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    const calls = vi.mocked(runMentoSearch).mock.calls;
+    expect(calls[calls.length - 1][4]).toBe(2020);
+    expect(calls[calls.length - 1][5]).toBe(2025);
+    const scholarLink = await screen.findByRole("link", { name: "Open in Google Scholar" });
+    const params = new URL(scholarLink.getAttribute("href")!).searchParams;
+    expect(params.get("as_ylo")).toBe("2020");
+    expect(params.get("as_yhi")).toBe("2025");
+  });
+
+  it("clears a prior query before changing filters without reusing its stale search", async () => {
+    const user = userEvent.setup();
+    vi.mocked(runMentoSearch).mockResolvedValue({ results: [paper], failedSources: [], succeededCount: 1 });
+    render(<MentoSearchPage />);
+    await search(user);
+    await user.click(screen.getByRole("button", { name: "Clear search" }));
+    const callsBeforeFilter = vi.mocked(runMentoSearch).mock.calls.length;
+    await user.click(screen.getByRole("button", { name: "Since 2023" }));
+    expect(runMentoSearch).toHaveBeenCalledTimes(callsBeforeFilter);
   });
 
   it("shows citation style controls and formatted citations on paper cards", async () => {

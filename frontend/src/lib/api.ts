@@ -128,10 +128,25 @@ export function searchBrief(
   timeoutMs?: number,
   yearFrom?: number,
   yearTo?: number,
+  papers: Array<{
+    id: string;
+    sourceId: string;
+    title: string;
+    authors: string[];
+    year?: number;
+    venue?: string;
+    doi?: string;
+    url: string;
+    abstract?: string;
+    citations?: number;
+  }> = [],
 ): Promise<BriefResponse> {
   return api<BriefResponse>("/search/brief", {
     method: "POST",
-    body: json({ query, sources, sort, year_from: yearFrom, year_to: yearTo }),
+    body: json({
+      query, sources, sort, year_from: yearFrom, year_to: yearTo,
+      papers: papers.map(({ sourceId, ...paper }) => ({ ...paper, source: sourceId })),
+    }),
     signal,
   }, timeoutMs);
 }

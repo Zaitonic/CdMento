@@ -30,8 +30,12 @@ const SUPPORT_LABELS: Record<BriefSupport, string> = {
   'evidence-only': 'Sources only',
 };
 
-const scholarUrl = (title: string) =>
-  `https://scholar.google.com/scholar?q=${encodeURIComponent(title)}`;
+const scholarUrl = (title: string, from?: number, to?: number) => {
+  const params = new URLSearchParams({ q: title });
+  if (from !== undefined) params.set('as_ylo', String(from));
+  if (to !== undefined) params.set('as_yhi', String(to));
+  return `https://scholar.google.com/scholar?${params}`;
+};
 
 const sourceName = (id: string) =>
   SOURCES.find((source) => source.id === id)?.name ?? id;
@@ -65,6 +69,22 @@ function savePreferences(prefs: { sources: string[]; sort: 'relevance' | 'newest
   }
 }
 
+function paperKey(paper: MentoResult) {
+  return paper.doi ? `doi:${paper.doi.toLowerCase()}` : `title:${paper.title.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+}
+
+function mergePapers(current: MentoResult[], incoming: MentoResult[], from?: number, to?: number) {
+  const seen = new Set<string>();
+  return [...current, ...incoming].filter((paper) => {
+    if ((from !== undefined && (paper.year === undefined || paper.year < from)) ||
+        (to !== undefined && (paper.year === undefined || paper.year > to))) return false;
+    const key = paperKey(paper);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export default function MentoSearchPage() {
   const [query, setQuery] = useState('');
   const [lastQuery, setLastQuery] = useState('');
@@ -84,6 +104,7 @@ export default function MentoSearchPage() {
   const [papersLoading, setPapersLoading] = useState(false);
   const [papersError, setPapersError] = useState('');
   const [failedSources, setFailedSources] = useState<string[]>([]);
+  const [sourceMessages, setSourceMessages] = useState<string[]>([]);
   const currentYear = new Date().getFullYear();
   const [yearFromInput, setYearFromInput] = useState('');
   const [yearToInput, setYearToInput] = useState('');
@@ -97,6 +118,7 @@ export default function MentoSearchPage() {
 
   const briefAbort = useRef<AbortController | null>(null);
   const papersAbort = useRef<AbortController | null>(null);
+  const papersRequest = useRef<Promise<MentoResult[]> | null>(null);
 
   useEffect(() => {
     savePreferences({ sources: [...sourcePreferences], sort: prefs.sort });
@@ -110,29 +132,40 @@ export default function MentoSearchPage() {
     [],
   );
 
-  const loadPapers = async (q: string, from = yearRange.from, to = yearRange.to) => {
+  const loadPapers = async (q: string, from = yearRange.from, to = yearRange.to): Promise<MentoResult[]> => {
     papersAbort.current?.abort();
     const controller = new AbortController();
     papersAbort.current = controller;
     setPapersLoading(true);
     setPapersError('');
     setFailedSources([]);
+    setSourceMessages([]);
     try {
-      const outcome = await runMentoSearch(q, sourcePreferences, controller.signal, 30_000, from, to);
-      if (controller.signal.aborted) return;
+      const outcome = await runMentoSearch(q, sourcePreferences, controller.signal, 30_000, from, to, prefs.sort);
+      if (controller.signal.aborted) return [];
       setPapers(outcome.results);
       setFailedSources(outcome.failedSources);
+      setSourceMessages(outcome.sourceMessages ?? []);
+      return outcome.results;
     } catch (err) {
       if (!controller.signal.aborted) {
         setPapersError(err instanceof Error ? err.message : 'Search failed');
         setPapers([]);
       }
+      return [];
     } finally {
       if (!controller.signal.aborted) setPapersLoading(false);
     }
   };
 
-  const loadBrief = async (q: string, from = yearRange.from, to = yearRange.to) => {
+  const startPapers = (q: string, from = yearRange.from, to = yearRange.to) => {
+    const request = loadPapers(q, from, to);
+    papersRequest.current = request;
+    void request;
+    return request;
+  };
+
+  const loadBrief = async (q: string, from = yearRange.from, to = yearRange.to, providedPapers?: MentoResult[]) => {
     briefAbort.current?.abort();
     const controller = new AbortController();
     briefAbort.current = controller;
@@ -140,8 +173,44 @@ export default function MentoSearchPage() {
     setBriefError('');
     setBriefLoading(true);
     try {
-      const data = await searchBrief(q, [...sourcePreferences], prefs.sort, controller.signal, 25_000, from, to);
-      if (!controller.signal.aborted) setBrief(data);
+      const currentPapers = providedPapers ?? (papersLoading
+        ? await (papersRequest.current ?? Promise.resolve(papers ?? []))
+        : (papers ?? await (papersRequest.current ?? Promise.resolve([]))));
+      const orderedPapers = prefs.sort === 'newest'
+        ? [...currentPapers].sort((a, b) => (b.year ?? 0) - (a.year ?? 0))
+        : currentPapers;
+      const data = await searchBrief(q, [...sourcePreferences], prefs.sort, controller.signal, 25_000, from, to, orderedPapers);
+      if (!controller.signal.aborted) {
+        const evidencePapers = data.evidence.map((item, index): MentoResult => ({
+          id: item.id,
+          title: item.title,
+          url: item.url,
+          sourceId: item.source,
+          sourceName: sourceName(item.source),
+          authors: item.authors,
+          year: item.year ?? undefined,
+          venue: item.venue,
+          citations: item.citations,
+          doi: item.doi,
+          abstract: item.abstract,
+          rank: index,
+        }));
+        const merged = mergePapers(orderedPapers, evidencePapers, from, to);
+        setPapers(merged);
+        setBrief({ ...data, evidence: merged.map((paper) => ({
+          id: paper.id,
+          source: paper.sourceId,
+          title: paper.title,
+          authors: paper.authors,
+          year: paper.year,
+          venue: paper.venue,
+          doi: paper.doi,
+          url: paper.url,
+          abstract: paper.abstract,
+          citations: paper.citations,
+          scholar_url: scholarUrl(paper.title, from, to),
+        })) });
+      }
     } catch (err) {
       if (!controller.signal.aborted) setBriefError(err instanceof Error ? err.message : 'Search failed');
     } finally {
@@ -170,13 +239,21 @@ export default function MentoSearchPage() {
     setFailedSources([]);
     setActiveEvidence(null);
 
-    void loadPapers(q);
+    startPapers(q);
   };
 
   const applyYearFilter = (from?: number, to?: number, label = 'Any time') => {
     setYearRange({ from, to });
     setYearFilterLabel(label);
-    if (lastQuery) void loadPapers(lastQuery, from, to);
+    setYearRangeError('');
+    setShowCustomYears(false);
+    const activeQuery = query.trim();
+    if (activeQuery) {
+      setLastQuery(activeQuery);
+      void startPapers(activeQuery, from, to).then((results) => {
+        if (tab === 'answer') void loadBrief(activeQuery, from, to, results);
+      });
+    }
   };
 
   const applyCustomYears = () => {
@@ -198,6 +275,26 @@ export default function MentoSearchPage() {
     } catch {
       setPapersError('Clipboard access failed. Select and copy the citation text instead.');
     }
+  };
+
+  const renderCitation = (paper: MentoResult, id: string) => {
+    const citation = formatCitation(paper, citationStyle);
+    const authorIndex = citation.text.indexOf(citation.authors);
+    const yearIndex = citation.text.indexOf(citation.year, authorIndex + citation.authors.length);
+    return (
+      <div className="citation-block">
+        <p>
+          {citation.text.slice(0, authorIndex)}
+          <span className="citation-author">{citation.authors}</span>
+          {citation.text.slice(authorIndex + citation.authors.length, yearIndex)}
+          <span className="citation-year">{citation.year}</span>
+          {citation.text.slice(yearIndex + citation.year.length)}
+        </p>
+        <button type="button" className="secondary" onClick={() => void copyCitation(paper, id)}>
+          <Copy size={13} /> {copiedCitation === id ? 'Copied' : 'Copy citation'}
+        </button>
+      </div>
+    );
   };
 
   const toggleSource = (id: string) => {
@@ -373,7 +470,7 @@ export default function MentoSearchPage() {
               </h3>
               <a
                 className="scholar-link"
-                href={scholarUrl(brief.query)}
+                href={scholarUrl(brief.query, yearRange.from, yearRange.to)}
                 target="_blank"
                 rel="noreferrer"
               >
@@ -397,7 +494,7 @@ export default function MentoSearchPage() {
                       <span className={`source-badge ${item.source}`}>
                         {sourceName(item.source)}
                       </span>
-                      {item.year && <span className="year">{item.year}</span>}
+                  {item.year && <span className="year year-pill">{item.year}</span>}
                       {typeof item.citations === 'number' && (
                         <span className="citations">
                           {item.citations} citations
@@ -413,7 +510,7 @@ export default function MentoSearchPage() {
                       {item.title} <ExternalLink size={13} />
                     </a>
                     {item.authors.length > 0 && (
-                      <p className="result-authors">
+                      <p className="result-authors authors-highlight">
                         {item.authors.slice(0, 4).join(', ')}
                         {item.authors.length > 4 && ' et al.'}
                       </p>
@@ -421,6 +518,20 @@ export default function MentoSearchPage() {
                     {item.venue && (
                       <p className="result-doi">{item.venue}</p>
                     )}
+                    {renderCitation({
+                      id: item.id,
+                      sourceId: item.source,
+                      sourceName: sourceName(item.source),
+                      title: item.title,
+                      url: item.url,
+                      authors: item.authors,
+                      year: item.year ?? undefined,
+                      venue: item.venue,
+                      doi: item.doi,
+                      abstract: item.abstract,
+                      citations: item.citations,
+                      rank: evidenceNumber(item.id),
+                    }, item.id)}
                     <div className="evidence-actions">
                       <a
                         className="evidence-link"
@@ -454,27 +565,44 @@ export default function MentoSearchPage() {
     );
   };
 
-  const renderPapers = () => {
-    const filterPanel = (
-      <aside className={`year-filter ${showMobileYearFilters ? 'mobile-expanded' : ''}`} aria-label="Publication year filter">
-        <button type="button" className="mobile-year-toggle" onClick={() => setShowMobileYearFilters((shown) => !shown)}>Publication year · {yearFilterLabel} <ChevronDown size={15} /></button>
-        <div className="year-filter-options">
-        <strong>Publication year</strong>
+  const renderYearFilter = () => (
+    <div className="year-filter" aria-label="Publication year filter">
+      <span className="year-filter-label">Publication year</span>
+      <div className="year-filter-pills">
         <button className={yearFilterLabel === 'Any time' ? 'active' : ''} onClick={() => applyYearFilter()} type="button">Any time</button>
         {[currentYear, currentYear - 1, currentYear - 3, currentYear - 4].map((year) => (
           <button key={year} className={yearFilterLabel === `Since ${year}` ? 'active' : ''} onClick={() => applyYearFilter(year, undefined, `Since ${year}`)} type="button">Since {year}</button>
         ))}
-        <button type="button" className={showCustomYears ? 'active' : ''} onClick={() => setShowCustomYears((shown) => !shown)}>Custom range…</button>
-        {showCustomYears && <div className="custom-year-range">
+        <button
+          type="button"
+          className={yearRange.from !== undefined || yearRange.to !== undefined ? 'active' : ''}
+          onClick={() => {
+            if (yearFilterLabel.includes('–')) {
+              setYearFromInput('');
+              setYearToInput('');
+              setShowCustomYears(false);
+              applyYearFilter();
+            } else {
+              setShowCustomYears((shown) => !shown);
+            }
+          }}
+        >
+          {yearFilterLabel.includes('–') ? `${yearFilterLabel} ×` : 'Custom range ▾'}
+        </button>
+      </div>
+      {showCustomYears && (
+        <div className="custom-year-range">
           <input aria-label="From year" inputMode="numeric" placeholder="From" value={yearFromInput} onChange={(event) => { setYearFromInput(event.target.value.replace(/\D/g, '').slice(0, 4)); setYearRangeError(''); }} />
           <span>—</span>
           <input aria-label="To year" inputMode="numeric" placeholder="To" value={yearToInput} onChange={(event) => { setYearToInput(event.target.value.replace(/\D/g, '').slice(0, 4)); setYearRangeError(''); }} />
-          <button type="button" className="primary" onClick={applyCustomYears}>Search</button>
+          <button type="button" className="primary" onClick={applyCustomYears}>Apply</button>
           {yearRangeError && <span className="year-range-error" role="alert">{yearRangeError}</span>}
-        </div>}
         </div>
-      </aside>
-    );
+      )}
+    </div>
+  );
+
+  const renderPapers = () => {
     let content;
     if (papersLoading) {
       content = (
@@ -495,7 +623,7 @@ export default function MentoSearchPage() {
           <button
             type="button"
             className="secondary"
-            onClick={() => void loadPapers(lastQuery)}
+            onClick={() => startPapers(lastQuery)}
           >
             Retry search
           </button>
@@ -508,7 +636,7 @@ export default function MentoSearchPage() {
           <button
             type="button"
             className="secondary"
-            onClick={() => void loadPapers(lastQuery)}
+            onClick={() => startPapers(lastQuery)}
           >
             Load papers
           </button>
@@ -524,9 +652,11 @@ export default function MentoSearchPage() {
         {failedSources.length > 0 && (
           <div className="empty-state warning" role="status">
             <p>
-              {failedSources.join(', ')}{' '}
-              {failedSources.length === 1 ? 'is' : 'are'} unavailable right
-              now. Results from the other sources are shown.
+              {sourceMessages.join(' ')}{' '}
+              {failedSources.filter((name) => !sourceMessages.some((message) => message.startsWith(name))).length > 0 && (
+                <>{failedSources.filter((name) => !sourceMessages.some((message) => message.startsWith(name))).join(', ')}{' '}
+                  {failedSources.length === 1 ? 'is' : 'are'} unavailable right now. Results from other sources are shown.</>
+              )}
             </p>
           </div>
         )}
@@ -536,7 +666,7 @@ export default function MentoSearchPage() {
           </div>
           <a
             className="scholar-link"
-            href={scholarUrl(lastQuery)}
+            href={scholarUrl(lastQuery, yearRange.from, yearRange.to)}
             target="_blank"
             rel="noreferrer"
           >
@@ -588,14 +718,7 @@ export default function MentoSearchPage() {
                 {result.doi && (
                   <p className="result-doi">DOI: {result.doi}</p>
                 )}
-                {(() => {
-                  const citation = formatCitation(result, citationStyle);
-                  const authorIndex = citation.text.indexOf(citation.authors);
-                  const yearIndex = citation.text.indexOf(citation.year, authorIndex + citation.authors.length);
-                  return <div className="citation-block"><p>
-                    {citation.text.slice(0, authorIndex)}<span className="citation-author">{citation.authors}</span>{citation.text.slice(authorIndex + citation.authors.length, yearIndex)}<span className="citation-year">{citation.year}</span>{citation.text.slice(yearIndex + citation.year.length)}
-                  </p><button type="button" className="secondary" onClick={() => void copyCitation(result, result.id)}><Copy size={13} />{copiedCitation === result.id ? 'Copied' : 'Copy citation'}</button></div>;
-                })()}
+                {renderCitation(result, result.id)}
               </li>
             ))}
           </ol>
@@ -612,7 +735,7 @@ export default function MentoSearchPage() {
       </>
     );
     }
-    return <div className="papers-layout">{filterPanel}<div className="papers-content">{content}</div></div>;
+    return content;
   };
 
   return (
@@ -657,6 +780,7 @@ export default function MentoSearchPage() {
           </button>
         </form>
 
+        <div className="search-tools-row">
         <div className="advanced-panel">
           <button
             type="button"
@@ -716,19 +840,12 @@ export default function MentoSearchPage() {
             </div>
           )}
         </div>
+        {renderYearFilter()}
+        </div>
       </div>
 
       {lastQuery && (
         <div className="result-tabs" role="tablist" aria-label="Search views">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'answer'}
-            className={tab === 'answer' ? 'active' : ''}
-            onClick={() => { setTab('answer'); if (lastQuery && !brief && !briefLoading) void loadBrief(lastQuery); }}
-          >
-            <Sparkles size={15} /> Answer
-          </button>
           <button
             type="button"
             role="tab"
@@ -737,6 +854,15 @@ export default function MentoSearchPage() {
             onClick={() => setTab('papers')}
           >
             <BookOpen size={15} /> Papers
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'answer'}
+            className={tab === 'answer' ? 'active' : ''}
+            onClick={() => { setTab('answer'); if (lastQuery && !brief && !briefLoading) void loadBrief(lastQuery); }}
+          >
+            <Sparkles size={15} /> Answer
           </button>
         </div>
       )}

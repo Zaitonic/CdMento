@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     ai_max_failover_attempts: int = Field(default=5, ge=1, le=10)
     ai_request_timeout_seconds: int = Field(default=45, ge=5, le=60)
     semantic_scholar_api_key: str = ""
+    serpapi_api_key: str = ""
+    serper_api_key: str = ""
     ai_daily_requests: int = Field(default=100, ge=1, le=1000)
     ai_max_output_tokens: int = Field(default=2400, ge=512, le=4096)
     redis_url: str = ""

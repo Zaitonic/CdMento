@@ -34,7 +34,7 @@ from .google_auth import GoogleAuth
 from .password_auth import PasswordAuth
 from .brevo import BrevoMailer
 from .documents import reading_sections
-from .scholar import DEFAULT_EVIDENCE_SOURCES, ScholarSearch
+from .scholar import DEFAULT_EVIDENCE_SOURCES, GoogleScholarNotConfigured, ScholarSearch
 from .providers.gateway import AIUnavailable, AIRefused
 
 
@@ -219,7 +219,11 @@ def create_app(config=None, services=None):
         openapi_tags=api_tags,
     )
     app.state.services = service
-    app.state.scholar = ScholarSearch(service.settings.semantic_scholar_api_key)
+    app.state.scholar = ScholarSearch(
+        service.settings.semantic_scholar_api_key,
+        serpapi_api_key=service.settings.serpapi_api_key,
+        serper_api_key=service.settings.serper_api_key,
+    )
     app.state.demo_auth = DemoAuth(repo)
     app.state.google_auth = GoogleAuth(repo, service.settings.google_client_id)
     app.state.brevo_mailer = BrevoMailer(
@@ -392,12 +396,15 @@ def create_app(config=None, services=None):
     @app.get("/api/v1/search/{source}")
     def search_proxy(
         source: str,
-        query: str,
         request: Request,
         owner: Owner,
+        query: str | None = None,
+        q: str | None = None,
         year_from: int | None = Query(default=None, ge=1900, le=2200),
         year_to: int | None = Query(default=None, ge=1900, le=2200),
+        sort: str = Query(default="relevance", pattern="^(relevance|newest)$"),
     ):
+        query = q or query or ""
         if year_from and year_to and year_from > year_to:
             raise HTTPException(422, "year_from must be less than or equal to year_to")
         scholar = request.app.state.scholar
@@ -417,7 +424,9 @@ def create_app(config=None, services=None):
                 )
             queue.append(time.time())
         try:
-            body, media_type = scholar.fetch(source, query, year_from, year_to)
+            body, media_type = scholar.fetch(source, query, year_from, year_to, sort)
+        except GoogleScholarNotConfigured as error:
+            raise HTTPException(503, {"error": str(error), "kind": "not_configured"}) from None
         except ValueError as error:
             raise HTTPException(400, str(error)) from None
         except Exception:
@@ -455,7 +464,11 @@ def create_app(config=None, services=None):
                 )
             queue.append(time.time())
         key = hashlib.sha256(
-            f"{data.query.casefold()}|{','.join(chosen)}|{data.sort}|{data.year_from}|{data.year_to}".encode()
+            (
+                f"{data.query.casefold()}|{','.join(chosen)}|{data.sort}|"
+                f"{data.year_from}|{data.year_to}|"
+                f"{json.dumps([paper.model_dump() for paper in data.papers], sort_keys=True) if data.papers is not None else 'server'}"
+            ).encode()
         ).hexdigest()
         cached = repo.get(owner, "search_cache", key)
         if (
@@ -465,7 +478,14 @@ def create_app(config=None, services=None):
         ):
             return {**cached["body"], "cached": True}
         try:
-            result = scholar.evidence(data.query, chosen, data.sort, data.year_from, data.year_to)
+            result = scholar.evidence(
+                data.query,
+                chosen,
+                data.sort,
+                data.year_from,
+                data.year_to,
+                [paper.model_dump() for paper in data.papers] if data.papers is not None else None,
+            )
         except ValueError as error:
             raise HTTPException(400, str(error)) from None
         except Exception:

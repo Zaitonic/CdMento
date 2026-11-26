@@ -5,7 +5,7 @@
 // Google Scholar has no public API and blocks cross-origin browser requests,
 // so it is offered as a direct "Open in Google Scholar" link instead.
 
-import { authHeaders } from "../../lib/api";
+import { api, ApiError, authHeaders } from "../../lib/api";
 
 export interface MentoResult {
   id: string;
@@ -27,13 +27,45 @@ export interface SourceConfig {
   name: string;
   description: string;
   defaultEnabled: boolean;
-  search: (query: string, signal: AbortSignal, timeoutMs?: number, yearFrom?: number, yearTo?: number) => Promise<MentoResult[]>;
+  search: (query: string, signal: AbortSignal, timeoutMs?: number, yearFrom?: number, yearTo?: number, sort?: "relevance" | "newest") => Promise<MentoResult[]>;
 }
 
 export interface YearRange { yearFrom?: number; yearTo?: number }
 
 const clean = (value: string | undefined | null): string =>
   (value || "").replace(/\s+/g, " ").trim();
+
+async function fetchYearAware(url: string, fallbackUrl: string, signal: AbortSignal, hasYearFilter: boolean) {
+  let response = await fetch(url, { signal });
+  if (hasYearFilter && (response.status === 400 || response.status === 422)) {
+    response = await fetch(fallbackUrl, { signal });
+  }
+  if (!response.ok) throw new Error(`Search provider responded ${response.status}`);
+  return response;
+}
+
+async function searchServerSource(
+  sourceId: string,
+  sourceName: string,
+  query: string,
+  signal: AbortSignal,
+  timeoutMs?: number,
+  yearFrom?: number,
+  yearTo?: number,
+  sort: "relevance" | "newest" = "relevance",
+  fallback?: SourceConfig["search"],
+): Promise<MentoResult[]> {
+  const params = new URLSearchParams({ q: query, sort });
+  if (yearFrom !== undefined) params.set("year_from", String(yearFrom));
+  if (yearTo !== undefined) params.set("year_to", String(yearTo));
+  try {
+    const result = await api<{ data: MentoResult[] }>(`/search/${sourceId}?${params}`, { signal }, timeoutMs);
+    return result.data || [];
+  } catch (error) {
+    if (!fallback || signal.aborted || (error instanceof ApiError && error.status < 500)) throw error;
+    return fallback(query, signal, timeoutMs, yearFrom, yearTo);
+  }
+}
 
 function stripTags(value: string): string {
   return clean(value.replace(/<[^>]*>/g, " "));
@@ -137,12 +169,12 @@ async function searchPubMed(
   yearFrom?: number,
   yearTo?: number,
 ): Promise<MentoResult[]> {
-  const term = yearFrom || yearTo
-    ? `(${query}) AND (${yearFrom || 1900}[Date - Publication] : ${yearTo || 2200}[Date - Publication])`
-    : query;
-  const searchUrl =
-    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&retmax=15&term=" +
-    encodeURIComponent(term);
+  const makeSearchUrl = (filtered: boolean) => {
+    const term = filtered && (yearFrom || yearTo)
+      ? `(${query}) AND (${yearFrom || 1900}[Date - Publication] : ${yearTo || 2200}[Date - Publication])`
+      : query;
+    return "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&retmax=15&term=" + encodeURIComponent(term);
+  };
   const timeout = timeoutMs ? new AbortController() : null;
   const timer = timeout ? setTimeout(() => timeout.abort(), timeoutMs) : null;
   const combinedSignal = timeout
@@ -150,9 +182,7 @@ async function searchPubMed(
       ? AbortSignal.any([signal, timeout.signal])
       : timeout.signal
     : signal;
-  const searchResponse = await fetch(searchUrl, { signal: combinedSignal });
-  if (!searchResponse.ok)
-    throw new Error(`PubMed responded ${searchResponse.status}`);
+  const searchResponse = await fetchYearAware(makeSearchUrl(true), makeSearchUrl(false), combinedSignal, Boolean(yearFrom || yearTo));
   const searchData = await searchResponse.json();
   const ids: string[] = searchData?.esearchresult?.idlist || [];
   if (!ids.length) return [];
@@ -198,12 +228,9 @@ async function searchEuropePMC(
   yearFrom?: number,
   yearTo?: number,
 ): Promise<MentoResult[]> {
-  const filteredQuery = yearFrom || yearTo
-    ? `(${query}) AND PUB_YEAR:[${yearFrom || '*'} TO ${yearTo || '*'}]`
-    : query;
-  const url =
-    "https://www.ebi.ac.uk/europepmc/webservices/rest/search?format=json&resultType=core&pageSize=15&query=" +
-    encodeURIComponent(filteredQuery);
+  const makeUrl = (term: string) =>
+    "https://www.ebi.ac.uk/europepmc/webservices/rest/search?format=json&resultType=core&pageSize=15&query=" + encodeURIComponent(term);
+  const filteredQuery = yearFrom || yearTo ? `(${query}) AND PUB_YEAR:[${yearFrom || '*'} TO ${yearTo || '*'}]` : query;
   const timeout = timeoutMs ? new AbortController() : null;
   const timer = timeout ? setTimeout(() => timeout.abort(), timeoutMs) : null;
   const combinedSignal = timeout
@@ -211,7 +238,7 @@ async function searchEuropePMC(
       ? AbortSignal.any([signal, timeout.signal])
       : timeout.signal
     : signal;
-  const response = await fetch(url, { signal: combinedSignal });
+  const response = await fetchYearAware(makeUrl(filteredQuery), makeUrl(query), combinedSignal, Boolean(yearFrom || yearTo));
   if (!response.ok) throw new Error(`Europe PMC responded ${response.status}`);
   const data = await response.json();
   const items: any[] = data?.resultList?.result || [];
@@ -249,10 +276,12 @@ async function searchCrossref(
   yearFrom?: number,
   yearTo?: number,
 ): Promise<MentoResult[]> {
-  const params = new URLSearchParams({ rows: "15", select: "title,author,abstract,DOI,URL,is-referenced-by-count,published-print,published-online,container-title", query });
-  const dateFilters = [yearFrom ? `from-pub-date:${yearFrom}-01-01` : "", yearTo ? `until-pub-date:${yearTo}-12-31` : ""].filter(Boolean);
-  if (dateFilters.length) params.set("filter", dateFilters.join(","));
-  const url = "https://api.crossref.org/works?" + params;
+  const makeUrl = (filtered: boolean) => {
+    const params = new URLSearchParams({ rows: "15", select: "title,author,abstract,DOI,URL,is-referenced-by-count,published-print,published-online,container-title", query });
+    const dateFilters = [filtered && yearFrom ? `from-pub-date:${yearFrom}-01-01` : "", filtered && yearTo ? `until-pub-date:${yearTo}-12-31` : ""].filter(Boolean);
+    if (dateFilters.length) params.set("filter", dateFilters.join(","));
+    return "https://api.crossref.org/works?" + params;
+  };
   const timeout = timeoutMs ? new AbortController() : null;
   const timer = timeout ? setTimeout(() => timeout.abort(), timeoutMs) : null;
   const combinedSignal = timeout
@@ -260,7 +289,7 @@ async function searchCrossref(
       ? AbortSignal.any([signal, timeout.signal])
       : timeout.signal
     : signal;
-  const response = await fetch(url, { signal: combinedSignal });
+  const response = await fetchYearAware(makeUrl(true), makeUrl(false), combinedSignal, Boolean(yearFrom || yearTo));
   if (!response.ok) throw new Error(`Crossref responded ${response.status}`);
   const data = await response.json();
   const items: any[] = data?.message?.items || [];
@@ -314,10 +343,12 @@ async function searchOpenAlex(
   yearFrom?: number,
   yearTo?: number,
 ): Promise<MentoResult[]> {
-  const params = new URLSearchParams({ "per-page": "15", search: query });
-  const yearFilters = [yearFrom ? `from_publication_date:${yearFrom}-01-01` : "", yearTo ? `to_publication_date:${yearTo}-12-31` : ""].filter(Boolean);
-  if (yearFilters.length) params.set("filter", yearFilters.join(","));
-  const url = "https://api.openalex.org/works?" + params;
+  const makeUrl = (filtered: boolean) => {
+    const params = new URLSearchParams({ "per-page": "15", search: query });
+    const yearFilters = [filtered && yearFrom ? `from_publication_date:${yearFrom}-01-01` : "", filtered && yearTo ? `to_publication_date:${yearTo}-12-31` : ""].filter(Boolean);
+    if (yearFilters.length) params.set("filter", yearFilters.join(","));
+    return "https://api.openalex.org/works?" + params;
+  };
   const timeout = timeoutMs ? new AbortController() : null;
   const timer = timeout ? setTimeout(() => timeout.abort(), timeoutMs) : null;
   const combinedSignal = timeout
@@ -325,7 +356,7 @@ async function searchOpenAlex(
       ? AbortSignal.any([signal, timeout.signal])
       : timeout.signal
     : signal;
-  const response = await fetch(url, { signal: combinedSignal });
+  const response = await fetchYearAware(makeUrl(true), makeUrl(false), combinedSignal, Boolean(yearFrom || yearTo));
   if (!response.ok) throw new Error(`OpenAlex responded ${response.status}`);
   const data = await response.json();
   const items: any[] = data?.results || [];
@@ -357,6 +388,13 @@ async function searchOpenAlex(
 
 export const SOURCES: SourceConfig[] = [
   {
+    id: "google_scholar",
+    name: "Google Scholar",
+    description: "Searches Google Scholar through a server-side SerpApi or Serper key",
+    defaultEnabled: false,
+    search: searchGoogleScholar,
+  },
+  {
     id: "semantic",
     name: "Semantic Scholar",
     description: "Academic papers with citations (needs an API key for reliable access)",
@@ -368,14 +406,14 @@ export const SOURCES: SourceConfig[] = [
     name: "Crossref",
     description: "Scholarly metadata across publishers",
     defaultEnabled: true,
-    search: searchCrossref,
+    search: (query, signal, timeout, from, to, sort) => searchServerSource("crossref", "Crossref", query, signal, timeout, from, to, sort, searchCrossref),
   },
   {
     id: "openalex",
     name: "OpenAlex",
     description: "Open catalogue of scholarly works",
     defaultEnabled: true,
-    search: searchOpenAlex,
+    search: (query, signal, timeout, from, to, sort) => searchServerSource("openalex", "OpenAlex", query, signal, timeout, from, to, sort, searchOpenAlex),
   },
   {
     id: "arxiv",
@@ -389,14 +427,14 @@ export const SOURCES: SourceConfig[] = [
     name: "PubMed",
     description: "Biomedical and life-science literature",
     defaultEnabled: false,
-    search: searchPubMed,
+    search: (query, signal, timeout, from, to, sort) => searchServerSource("pubmed", "PubMed", query, signal, timeout, from, to, sort, searchPubMed),
   },
   {
     id: "europepmc",
     name: "Europe PMC",
     description: "Life-science literature and preprints",
     defaultEnabled: true,
-    search: searchEuropePMC,
+    search: (query, signal, timeout, from, to, sort) => searchServerSource("europepmc", "Europe PMC", query, signal, timeout, from, to, sort, searchEuropePMC),
   },
 ];
 
@@ -404,6 +442,7 @@ export interface SearchOutcome {
   results: MentoResult[];
   failedSources: string[];
   succeededCount: number;
+  sourceMessages?: string[];
 }
 
 function dedupeKey(result: MentoResult): string {
@@ -430,21 +469,33 @@ export async function runMentoSearch(
   timeoutMs?: number,
   yearFrom?: number,
   yearTo?: number,
+  sort: "relevance" | "newest" = "relevance",
 ): Promise<SearchOutcome> {
   const active = SOURCES.filter((source) => enabledIds.has(source.id));
   if (!active.length) {
     throw new Error("Enable at least one trusted source to search.");
   }
   const settled = await Promise.allSettled(
-    active.map((source) => source.search(query, signal, timeoutMs, yearFrom, yearTo)),
+    active.map((source) => source.search(
+      query.trim().toLocaleLowerCase() === "it" ? "information technology" : query,
+      signal,
+      timeoutMs,
+      yearFrom,
+      yearTo,
+      sort,
+    )),
   );
   const failedSources: string[] = [];
+  const sourceMessages: string[] = [];
   const groups: MentoResult[][] = [];
   settled.forEach((outcome, index) => {
     if (outcome.status === "fulfilled") {
       if (outcome.value.length) groups.push(outcome.value);
     } else {
       failedSources.push(active[index].name);
+      if (active[index].id === "google_scholar" && outcome.reason instanceof Error) {
+        sourceMessages.push(outcome.reason.message);
+      }
     }
   });
   const succeededCount = settled.length - failedSources.length;
@@ -459,5 +510,37 @@ export async function runMentoSearch(
     seen.add(key);
     unique.push(result);
   }
-  return { results: unique, failedSources, succeededCount };
+  return { results: unique, failedSources, succeededCount, sourceMessages };
+}
+
+async function searchGoogleScholar(
+  query: string,
+  signal: AbortSignal,
+  timeoutMs?: number,
+  yearFrom?: number,
+  yearTo?: number,
+  sort: "relevance" | "newest" = "relevance",
+): Promise<MentoResult[]> {
+  const params = new URLSearchParams({ q: query, sort });
+  if (yearFrom !== undefined) params.set("year_from", String(yearFrom));
+  if (yearTo !== undefined) params.set("year_to", String(yearTo));
+  const result = await api<{ data: Array<Record<string, unknown>> }>(
+    `/search/google_scholar?${params}`,
+    { signal },
+    timeoutMs,
+  );
+  return (result.data || []).map((item, index) => ({
+    id: String(item.id || `google-scholar-${index}`),
+    title: clean(String(item.title || "")) || "Untitled",
+    url: String(item.url || "https://scholar.google.com/"),
+    sourceId: "google_scholar",
+    sourceName: "Google Scholar",
+    authors: Array.isArray(item.authors) ? item.authors.map(String) : [],
+    abstract: clean(String(item.abstract || "")) || undefined,
+    year: typeof item.year === "number" ? item.year : undefined,
+    venue: clean(String(item.venue || "")) || undefined,
+    citations: typeof item.citations === "number" ? item.citations : undefined,
+    doi: typeof item.doi === "string" ? item.doi : undefined,
+    rank: index,
+  }));
 }

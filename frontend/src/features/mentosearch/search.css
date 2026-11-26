@@ -13,6 +13,8 @@
   gap: 20px;
 }
 
+.search-tools-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+
 /* Search bar — Google-style */
 .search-form {
   display: flex;
@@ -278,16 +280,14 @@
   word-break: break-all;
 }
 
-.papers-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 20px; align-items: start; }
-.papers-content { min-width: 0; }
-.year-filter { display: grid; gap: 7px; position: sticky; top: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); }
-.mobile-year-toggle { display: none; }
-.year-filter-options { display: grid; gap: 7px; }
-.year-filter > button { text-align: left; border: 0; border-radius: 8px; padding: 8px 10px; background: transparent; color: var(--text); cursor: pointer; }
-.year-filter > button:hover, .year-filter > button.active { background: var(--soft); color: var(--primary); font-weight: 700; }
-.custom-year-range { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 6px; align-items: center; }
-.custom-year-range input { width: 100%; min-width: 0; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 8px 6px; }
-.custom-year-range .primary { grid-column: 1 / -1; }
+.year-filter { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: var(--text); }
+.year-filter-label { color: var(--muted); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.year-filter-pills { display: flex; flex-wrap: wrap; gap: 5px; }
+.year-filter-pills button { min-height: 30px; border: 1px solid var(--border); border-radius: 999px; padding: 4px 9px; background: var(--surface); color: var(--text); font-size: 11px; cursor: pointer; }
+.year-filter-pills button:hover, .year-filter-pills button.active { background: var(--soft); border-color: var(--primary); color: var(--primary); font-weight: 700; }
+.custom-year-range { position: absolute; z-index: 5; top: calc(100% + 7px); right: 0; display: grid; grid-template-columns: 72px auto 72px auto; gap: 6px; align-items: center; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 8px 24px rgba(20, 20, 35, .16); }
+.custom-year-range input { width: 72px; min-width: 0; height: 30px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 4px 6px; font-size: 12px; }
+.custom-year-range .primary { min-height: 30px; padding: 4px 10px; font-size: 11px; }
 .year-pill { background: var(--soft); color: var(--primary); border-radius: 999px; padding: 4px 9px; font-weight: 800; }
 .authors-highlight { color: var(--text); font-weight: 600; }
 .citation-block { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--soft); }
@@ -734,12 +734,13 @@
 
 @media (max-width: 620px) {
   .mentosearch-screen { padding: 0 12px; }
-  .papers-layout { display: block; }
-  .year-filter { position: static; margin-bottom: 12px; padding: 10px; }
-  .mobile-year-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; border: 0; background: transparent; color: var(--text); font-weight: 700; }
-  .year-filter-options { display: none; }
-  .year-filter.mobile-expanded .year-filter-options { display: grid; }
-  .custom-year-range { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+  .search-tools-row { align-items: flex-start; }
+  .year-filter { width: 100%; }
+  .year-filter-label { width: 100%; }
+  .year-filter-pills { gap: 5px; }
+  .year-filter-pills button { font-size: 10px; padding: 4px 7px; }
+  .custom-year-range { left: 0; right: auto; grid-template-columns: 64px auto 64px auto; }
+  .custom-year-range input { width: 64px; }
   .citation-block { flex-direction: column; }
   .results-header { flex-wrap: wrap; }
   .answer-header {

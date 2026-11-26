@@ -139,6 +139,35 @@ def test_brief_returns_answer_evidence_and_support(client):
     assert services.ai.calls == 1
 
 
+def test_brief_uses_the_fetched_papers_as_its_exact_evidence(client):
+    test_client, app, _ = client
+    app.state.scholar = ScholarSearch(transport=httpx.MockTransport(
+        lambda request: pytest.fail("Client-fetched papers should prevent a second provider search")
+    ))
+    paper = {
+        "id": "crossref-10.1/client",
+        "source": "crossref",
+        "title": "Information technology fundamentals",
+        "url": "https://doi.org/10.1/client",
+        "authors": ["Ada Lovelace"],
+        "year": 2023,
+        "venue": "Journal of IT",
+        "doi": "10.1/client",
+        "abstract": "A concise overview of information technology.",
+        "citations": 7,
+    }
+    response = test_client.post(
+        "/api/v1/search/brief",
+        json=brief_payload(papers=[paper]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["evidence"] == [{
+        **paper,
+        "scholar_url": "https://scholar.google.com/scholar?q=Information%20technology%20fundamentals",
+    }]
+
+
 def test_brief_is_cached_per_owner_and_query(client):
     test_client, _, services = client
 

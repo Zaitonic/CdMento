@@ -101,6 +101,94 @@ def test_semantic_proxy_passes_year_filter_and_removes_out_of_range_papers(clien
     assert test_client.get("/api/v1/search/arxiv", params={"query": "memory", "year_from": 2024, "year_to": 2020}).status_code == 422
 
 
+def test_google_scholar_proxy_normalizes_serpapi_results_and_years(client):
+    test_client, app = client
+    seen = []
+
+    def handler(request: httpx.Request):
+        seen.append(dict(request.url.params))
+        return httpx.Response(200, json={"organic_results": [{
+            "title": "IT fundamentals",
+            "link": "https://example.org/it",
+            "publication_info": {
+                "summary": "A Lovelace, Journal of IT, 2023",
+                "authors": [{"name": "Ada Lovelace"}],
+            },
+            "snippet": "An introduction to information technology.",
+            "inline_links": {"cited_by": {"total": 12}},
+        }]})
+
+    app.state.scholar = ScholarSearch(
+        transport=httpx.MockTransport(handler), serpapi_api_key="server-secret"
+    )
+    response = test_client.get("/api/v1/search/google_scholar", params={
+        "q": "IT fundamentals", "year_from": 2020, "year_to": 2024, "sort": "newest",
+    })
+
+    assert response.status_code == 200
+    paper = response.json()["data"][0]
+    assert paper == {
+        "id": "", "source": "google_scholar", "title": "IT fundamentals",
+        "authors": ["Ada Lovelace"], "year": 2023,
+        "venue": "A Lovelace, Journal of IT, 2023", "doi": "",
+        "url": "https://example.org/it",
+        "abstract": "An introduction to information technology.", "citations": 12,
+    }
+    assert seen[0]["engine"] == "google_scholar"
+    assert seen[0]["as_ylo"] == "2020" and seen[0]["as_yhi"] == "2024"
+    assert seen[0]["scisbd"] == "1"
+    assert "server-secret" not in response.text
+
+
+def test_papers_source_proxy_returns_the_same_normalized_record_shape(client):
+    test_client, app = client
+
+    def handler(request: httpx.Request):
+        return httpx.Response(200, json={"message": {"items": [{
+            "DOI": "10.1/it", "title": ["Information technology fundamentals"],
+            "author": [{"given": "Ada", "family": "Lovelace"}],
+            "issued": {"date-parts": [[2023]]}, "URL": "https://doi.org/10.1/it",
+        }]}})
+
+    app.state.scholar = ScholarSearch(transport=httpx.MockTransport(handler))
+    response = test_client.get("/api/v1/search/crossref", params={"q": "it", "sort": "newest"})
+
+    assert response.status_code == 200
+    paper = response.json()["data"][0]
+    assert paper["id"].startswith("crossref-ev-")
+    assert paper["sourceId"] == "crossref" and paper["sourceName"] == "Crossref"
+    assert paper["title"] == "Information technology fundamentals"
+    assert paper["authors"] == ["Ada Lovelace"] and paper["year"] == 2023
+
+
+def test_google_scholar_without_key_returns_clear_setup_message(client):
+    test_client, _ = client
+    response = test_client.get("/api/v1/search/google_scholar", params={"q": "it"})
+    assert response.status_code == 503
+    assert response.json()["error"] == "Google Scholar requires SERPAPI_API_KEY or SERPER_API_KEY"
+
+
+def test_evidence_retries_without_rejected_year_filter_and_post_filters():
+    seen = []
+
+    def handler(request: httpx.Request):
+        seen.append(dict(request.url.params))
+        if request.url.params.get("filter"):
+            return httpx.Response(400, json={"message": "unsupported date filter"})
+        return httpx.Response(200, json={"message": {"items": [
+            {"DOI": "10.1/old", "title": ["Old memory study"], "issued": {"date-parts": [[2018]]}},
+            {"DOI": "10.1/in", "title": ["Memory study in range"], "issued": {"date-parts": [[2022]]}},
+            {"DOI": "10.1/new", "title": ["New memory study"], "issued": {"date-parts": [[2025]]}},
+        ]}})
+
+    result = ScholarSearch(transport=httpx.MockTransport(handler)).evidence(
+        "memory study", ["crossref"], year_from=2020, year_to=2023,
+    )
+    assert len(seen) == 2
+    assert "filter" in seen[0] and "filter" not in seen[1]
+    assert [item["year"] for item in result["evidence"]] == [2022]
+
+
 def test_evidence_applies_provider_year_filters_and_post_filters():
     seen = []
 

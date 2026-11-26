@@ -82,9 +82,9 @@ const europePmcPayload = {
   },
 };
 
-function jsonResponse(body: unknown) {
+function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: { "content-type": "application/json" },
   });
 }
@@ -94,7 +94,21 @@ let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
+    if (url.includes("/api/v1/search/google_scholar")) return jsonResponse({ data: [{
+      id: "google-1", title: "IT fundamentals", url: "https://example.org/it",
+      authors: ["Ada Lovelace"], year: 2023, venue: "Journal of IT", citations: 5,
+    }] });
     if (url.includes("/api/v1/search/semantic")) return jsonResponse(semanticPayload);
+    if (url.includes("/api/v1/search/crossref")) return jsonResponse({ data: [
+      { id: "crossref-ev-1", title: "Spaced repetition improves retention", url: "https://doi.org/10.1/dup", sourceId: "crossref", sourceName: "Crossref", authors: ["Ada Lovelace"], year: 2021, doi: "10.1/DUP", rank: 0 },
+      { id: "crossref-ev-2", title: "Interleaving practice beats blocking", url: "https://doi.org/10.1/unique", sourceId: "crossref", sourceName: "Crossref", authors: [], year: 2019, abstract: "Second result", rank: 1 },
+    ] });
+    if (url.includes("/api/v1/search/openalex")) return jsonResponse({ data: [{
+      id: "openalex-ev-1", title: "Interleaving and spacing", url: "https://openalex.org/W1", sourceId: "openalex", sourceName: "OpenAlex", authors: ["Grace Hopper"], year: 2022, citations: 7, doi: "10.9/oa", abstract: "retrieval Spaced helps", rank: 0,
+    }] });
+    if (url.includes("/api/v1/search/europepmc")) return jsonResponse({ data: [{
+      id: "europepmc-ev-1", title: "Spaced repetition improves long-term retention", url: "https://europepmc.org/article/MED/123456", sourceId: "europepmc", sourceName: "Europe PMC", authors: ["Lovelace A", "Hopper G"], year: 2020, venue: "Journal of Learning", citations: 9, doi: "10.1/epmc", rank: 0,
+    }] });
     if (url.includes("crossref.org")) return jsonResponse(crossrefPayload);
     if (url.includes("openalex.org")) return jsonResponse(openAlexPayload);
     if (url.includes("europepmc")) return jsonResponse(europePmcPayload);
@@ -125,8 +139,8 @@ describe("MentoSearch providers", () => {
     expect(outcome.succeededCount).toBe(3);
     expect(outcome.results.map((r) => r.id)).toEqual([
       "s2-p1",
-      "openalex-https://openalex.org/W1",
-      "crossref-10.1/unique",
+      "openalex-ev-1",
+      "crossref-ev-2",
     ]);
     expect(outcome.results[0].doi).toBe("10.1/DUP");
     expect(outcome.results[2].abstract).toBe("Second result");
@@ -141,8 +155,65 @@ describe("MentoSearch providers", () => {
       "spaced repetition", new Set(["crossref"]), new AbortController().signal, 30_000, 2020, 2022,
     );
     expect(results.map((paper) => paper.year)).toEqual([2021]);
-    const url = new URL(String(fetchMock.mock.calls[0][0]));
-    expect(url.searchParams.get("filter")).toBe("from-pub-date:2020-01-01,until-pub-date:2022-12-31");
+    const url = new URL(String(fetchMock.mock.calls[0][0]), "https://cdmento.test");
+    expect(url.searchParams.get("year_from")).toBe("2020");
+    expect(url.searchParams.get("year_to")).toBe("2022");
+  });
+
+  it("retries a rejected Crossref year filter without the filter and post-filters", async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/v1/search/crossref")) return jsonResponse({}, 503);
+      if (url.includes("crossref.org") && url.includes("filter=")) return jsonResponse({}, 400);
+      if (url.includes("crossref.org")) return jsonResponse(crossrefPayload);
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    const outcome = await runMentoSearch(
+      "spaced repetition", new Set(["crossref"]), new AbortController().signal, 30_000, 2020, 2022,
+    );
+    expect(outcome.results.map((paper) => paper.year)).toEqual([2021]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchMock.mock.calls[1][0])).toContain("filter=");
+    expect(String(fetchMock.mock.calls[2][0])).not.toContain("filter=");
+  });
+
+  it("maps the server-side Google Scholar provider and carries year bounds", async () => {
+    const outcome = await runMentoSearch(
+      "IT fundamentals", new Set(["google_scholar"]), new AbortController().signal, 30_000, 2020, 2024, "newest",
+    );
+    expect(outcome.results[0]).toMatchObject({
+      id: "google-1", sourceId: "google_scholar", sourceName: "Google Scholar",
+      authors: ["Ada Lovelace"], year: 2023, citations: 5,
+    });
+    expect(String(fetchMock.mock.calls[0][0])).toContain("year_from=2020");
+    expect(String(fetchMock.mock.calls[0][0])).toContain("year_to=2024");
+    expect(String(fetchMock.mock.calls[0][0])).toContain("sort=newest");
+  });
+
+  it("keeps a clear setup note when Google Scholar has no server key", async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input).includes("google_scholar")) return jsonResponse({
+        error: "Google Scholar requires SERPAPI_API_KEY or SERPER_API_KEY",
+        kind: "not_configured",
+      }, 503);
+      return jsonResponse({ data: [{
+        id: "crossref-ev-1", title: "Information technology fundamentals", url: "https://doi.org/10.1/it",
+        sourceId: "crossref", sourceName: "Crossref", authors: ["Ada Lovelace"], year: 2023,
+        doi: "10.1/it", rank: 0,
+      }] });
+    });
+    const outcome = await runMentoSearch(
+      "information technology", new Set(["google_scholar", "crossref"]), new AbortController().signal,
+    );
+    expect(outcome.failedSources).toContain("Google Scholar");
+    expect(outcome.sourceMessages).toContain("Google Scholar requires SERPAPI_API_KEY or SERPER_API_KEY");
+    expect(outcome.results.length).toBeGreaterThan(0);
+  });
+
+  it("expands the exact short query 'it' before requesting sources", async () => {
+    await runMentoSearch("it", new Set(["crossref"]), new AbortController().signal);
+    const url = new URL(String(fetchMock.mock.calls[0][0]), "https://cdmento.test");
+    expect(url.searchParams.get("q")).toBe("information technology");
   });
 
   it("reconstructs OpenAlex abstracts and normalises DOIs", async () => {
@@ -168,7 +239,7 @@ describe("MentoSearch providers", () => {
 
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({
-      id: "europepmc-MED-123456",
+      id: "europepmc-ev-1",
       title: "Spaced repetition improves long-term retention",
       url: "https://europepmc.org/article/MED/123456",
       sourceId: "europepmc",
@@ -180,9 +251,7 @@ describe("MentoSearch providers", () => {
       doi: "10.1/epmc",
     });
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "https://www.ebi.ac.uk/europepmc/webservices/rest/search",
-      ),
+      expect.stringContaining("/api/v1/search/europepmc?"),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
