@@ -17,5 +17,9 @@ export function formatCitation(paper: MentoResult, style: CitationStyle = "APA")
   } else {
     text = `${authorText} (${year}). ${title}.${venue ? ` ${venue}.` : ""}${link ? ` ${link}.` : ""}`;
   }
-  return { authors: authorText, year, text: text.replace(/\s+/g, " ").trim() };
+  return {
+    authors: authorText,
+    year,
+    text: text.replace(/\s+/g, " ").replace(/\(\s+/g, "(").replace(/\s+\)/g, ")").trim(),
+  };
 }

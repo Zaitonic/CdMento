@@ -647,17 +647,20 @@ export default function MentoSearchPage() {
       prefs.sort === 'newest'
         ? [...papers].sort((a, b) => (b.year ?? 0) - (a.year ?? 0))
         : papers;
+    const unreportedFailedSources = failedSources.filter(
+      (name) => !sourceMessages.some((message) => message.startsWith(name)),
+    );
+    const noticeMessages = [
+      ...sourceMessages,
+      ...(unreportedFailedSources.length > 0
+        ? [`${unreportedFailedSources.join(', ')} ${unreportedFailedSources.length === 1 ? 'is' : 'are'} unavailable right now. Results from other sources are shown.`]
+        : []),
+    ];
     content = (
       <>
-        {failedSources.length > 0 && (
+        {noticeMessages.length > 0 && (
           <div className="empty-state warning" role="status">
-            <p>
-              {sourceMessages.join(' ')}{' '}
-              {failedSources.filter((name) => !sourceMessages.some((message) => message.startsWith(name))).length > 0 && (
-                <>{failedSources.filter((name) => !sourceMessages.some((message) => message.startsWith(name))).join(', ')}{' '}
-                  {failedSources.length === 1 ? 'is' : 'are'} unavailable right now. Results from other sources are shown.</>
-              )}
-            </p>
+            <p>{noticeMessages.join(' · ')}</p>
           </div>
         )}
         <div className="results-header">
