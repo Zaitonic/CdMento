@@ -126,10 +126,12 @@ export function searchBrief(
   sort: "relevance" | "newest",
   signal?: AbortSignal,
   timeoutMs?: number,
+  yearFrom?: number,
+  yearTo?: number,
 ): Promise<BriefResponse> {
   return api<BriefResponse>("/search/brief", {
     method: "POST",
-    body: json({ query, sources, sort }),
+    body: json({ query, sources, sort, year_from: yearFrom, year_to: yearTo }),
     signal,
   }, timeoutMs);
 }

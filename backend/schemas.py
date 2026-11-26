@@ -436,6 +436,8 @@ class SearchBriefInput(Input):
     query: str = Field(min_length=2, max_length=200)
     sources: list[str] = Field(default_factory=list, max_length=6)
     sort: Literal["relevance", "newest"] = "relevance"
+    year_from: int | None = Field(default=None, ge=1900, le=2200)
+    year_to: int | None = Field(default=None, ge=1900, le=2200)
 
     @field_validator("query")
     @classmethod
@@ -444,6 +446,12 @@ class SearchBriefInput(Input):
         if len(value) < 2:
             raise ValueError("Enter a topic to search.")
         return value
+
+    @model_validator(mode="after")
+    def valid_year_range(self):
+        if self.year_from and self.year_to and self.year_from > self.year_to:
+            raise ValueError("year_from must be less than or equal to year_to")
+        return self
 
 
 class BriefPoint(Input):

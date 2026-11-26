@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
-from fastapi import FastAPI, Depends, HTTPException, Request, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, Query, Request, UploadFile, File
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -390,7 +390,16 @@ def create_app(config=None, services=None):
         }
 
     @app.get("/api/v1/search/{source}")
-    def search_proxy(source: str, query: str, request: Request, owner: Owner):
+    def search_proxy(
+        source: str,
+        query: str,
+        request: Request,
+        owner: Owner,
+        year_from: int | None = Query(default=None, ge=1900, le=2200),
+        year_to: int | None = Query(default=None, ge=1900, le=2200),
+    ):
+        if year_from and year_to and year_from > year_to:
+            raise HTTPException(422, "year_from must be less than or equal to year_to")
         scholar = request.app.state.scholar
         if source not in scholar.sources:
             raise HTTPException(404, "Unknown search source.")
@@ -408,7 +417,7 @@ def create_app(config=None, services=None):
                 )
             queue.append(time.time())
         try:
-            body, media_type = scholar.fetch(source, query)
+            body, media_type = scholar.fetch(source, query, year_from, year_to)
         except ValueError as error:
             raise HTTPException(400, str(error)) from None
         except Exception:
@@ -446,7 +455,7 @@ def create_app(config=None, services=None):
                 )
             queue.append(time.time())
         key = hashlib.sha256(
-            f"{data.query.casefold()}|{','.join(chosen)}|{data.sort}".encode()
+            f"{data.query.casefold()}|{','.join(chosen)}|{data.sort}|{data.year_from}|{data.year_to}".encode()
         ).hexdigest()
         cached = repo.get(owner, "search_cache", key)
         if (
@@ -456,7 +465,7 @@ def create_app(config=None, services=None):
         ):
             return {**cached["body"], "cached": True}
         try:
-            result = scholar.evidence(data.query, chosen, data.sort)
+            result = scholar.evidence(data.query, chosen, data.sort, data.year_from, data.year_to)
         except ValueError as error:
             raise HTTPException(400, str(error)) from None
         except Exception:

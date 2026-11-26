@@ -9,6 +9,7 @@ Two jobs live here:
    from the request.
 """
 
+import json
 import re
 import time
 import xml.etree.ElementTree as ET
@@ -180,7 +181,12 @@ def _get(client, url, params=None, headers=None):
 # --- Per-source retrival ----------------------------------------------------
 
 
-def _fetch_crossref(client, query, api_key=""):
+def _fetch_crossref(client, query, api_key="", year_from=None, year_to=None):
+    date_filter = []
+    if year_from:
+        date_filter.append(f"from-pub-date:{year_from}-01-01")
+    if year_to:
+        date_filter.append(f"until-pub-date:{year_to}-12-31")
     response = _get(
         client,
         "https://api.crossref.org/works",
@@ -188,6 +194,7 @@ def _fetch_crossref(client, query, api_key=""):
             "query.bibliographic": query,
             "rows": 15,
             "select": "DOI,title,author,issued,container-title,abstract,URL,is-referenced-by-count",
+            **({"filter": ",".join(date_filter)} if date_filter else {}),
         },
     )
     response.raise_for_status()
@@ -231,11 +238,16 @@ def _openalex_abstract(index):
     return " ".join(word for _, word in words)
 
 
-def _fetch_openalex(client, query, api_key=""):
+def _fetch_openalex(client, query, api_key="", year_from=None, year_to=None):
+    year_filter = []
+    if year_from:
+        year_filter.append(f"from_publication_date:{year_from}-01-01")
+    if year_to:
+        year_filter.append(f"to_publication_date:{year_to}-12-31")
     response = _get(
         client,
         "https://api.openalex.org/works",
-        params={"search": query, "per-page": 15},
+        params={"search": query, "per-page": 15, **({"filter": ",".join(year_filter)} if year_filter else {})},
     )
     response.raise_for_status()
     items = response.json().get("results", [])
@@ -262,7 +274,8 @@ def _fetch_openalex(client, query, api_key=""):
     return [r for r in records if r]
 
 
-def _fetch_europepmc(client, query, api_key=""):
+def _fetch_europepmc(client, query, api_key="", year_from=None, year_to=None):
+    query = f"({query}) AND PUB_YEAR:[{year_from or '*'} TO {year_to or '*'}]" if year_from or year_to else query
     response = _get(
         client,
         "https://www.ebi.ac.uk/europepmc/webservices/rest/search",
@@ -305,7 +318,9 @@ def _fetch_europepmc(client, query, api_key=""):
     return [r for r in records if r]
 
 
-def _fetch_arxiv(client, query, api_key=""):
+def _fetch_arxiv(client, query, api_key="", year_from=None, year_to=None):
+    if year_from or year_to:
+        query = f"({query}) AND submittedDate:[{year_from or 1900}01010000 TO {year_to or 2200}12312359]"
     response = _get(
         client,
         "https://export.arxiv.org/api/query",
@@ -340,7 +355,9 @@ def _fetch_arxiv(client, query, api_key=""):
     return [r for r in records if r]
 
 
-def _fetch_pubmed(client, query, api_key=""):
+def _fetch_pubmed(client, query, api_key="", year_from=None, year_to=None):
+    if year_from or year_to:
+        query = f"({query}) AND ({year_from or 1900}[Date - Publication] : {year_to or 2200}[Date - Publication])"
     search = _get(
         client,
         "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
@@ -388,12 +405,12 @@ def _fetch_pubmed(client, query, api_key=""):
     return [r for r in records if r]
 
 
-def _fetch_semantic(client, query, api_key=""):
+def _fetch_semantic(client, query, api_key="", year_from=None, year_to=None):
     fields = "title,abstract,authors,year,externalIds,url,citationCount,venue"
     response = _get(
         client,
         "https://api.semanticscholar.org/graph/v1/paper/search",
-        params={"query": query, "limit": 15, "fields": fields},
+        params={"query": query, "limit": 15, "fields": fields, **({"year": f"{year_from or 1900}-{year_to or 2200}"} if year_from or year_to else {})},
         headers={"x-api-key": api_key} if api_key else None,
     )
     response.raise_for_status()
@@ -550,7 +567,7 @@ class ScholarSearch:
     def evidence_sources(self):
         return EVIDENCE_SOURCES
 
-    def fetch(self, source, query):
+    def fetch(self, source, query, year_from=None, year_to=None):
         """Return (body, media_type) for one allow-listed scholarly source."""
         try:
             base, media_type = _PROVIDERS[source]
@@ -566,17 +583,36 @@ class ScholarSearch:
             headers=headers,
             transport=self._transport,
         ) as client:
-            url = base + quote(query, safe="")
+            if source == "semantic" and (year_from or year_to):
+                url = base + quote(query, safe="") + f"&year={year_from or 1900}-{year_to or 2200}"
+            elif source == "arxiv" and (year_from or year_to):
+                date_query = f"({query}) AND submittedDate:[{year_from or 1900}01010000 TO {year_to or 2200}12312359]"
+                url = base + quote(date_query, safe="")
+            else:
+                url = base + quote(query, safe="")
             # The public pools throttle bursts; short retries avoid most
             # transient 429/503 responses without a long user-visible wait.
             for attempt in range(ATTEMPTS):
                 response = client.get(url)
                 if response.status_code not in RETRIES or attempt == ATTEMPTS - 1:
                     response.raise_for_status()
-                    return response.content, media_type
+                    body = response.content
+                    if year_from or year_to:
+                        if source == "semantic":
+                            data = response.json()
+                            data["data"] = [paper for paper in data.get("data", []) if isinstance(paper.get("year"), int) and (year_from is None or paper["year"] >= year_from) and (year_to is None or paper["year"] <= year_to)]
+                            body = json.dumps(data).encode()
+                        else:
+                            root = ET.fromstring(response.content)
+                            for entry in root.findall("a:entry", _ATOM):
+                                year = _year(entry.findtext("a:published", default="", namespaces=_ATOM))
+                                if year is None or (year_from is not None and year < year_from) or (year_to is not None and year > year_to):
+                                    root.remove(entry)
+                            body = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+                    return body, media_type
                 time.sleep(2)
 
-    def evidence(self, query, sources=None, sort="relevance"):
+    def evidence(self, query, sources=None, sort="relevance", year_from=None, year_to=None):
         """Retrieve, normalize, dedupe, and rank evidence from every source."""
         query = _clean_query(query)
         search_query = _expand_query(query)
@@ -597,7 +633,7 @@ class ScholarSearch:
             with ThreadPoolExecutor(max_workers=len(chosen)) as pool:
                 futures = {
                     source: pool.submit(
-                        _FETCHERS[source], client, search_query, self.api_key
+                        _FETCHERS[source], client, search_query, self.api_key, year_from, year_to
                     )
                     for source in chosen
                 }
@@ -608,6 +644,7 @@ class ScholarSearch:
                         records.extend(futures[source].result())
                     except Exception:
                         failed.append(source)
+        records = [record for record in records if (year_from is None or record["year"] is not None and record["year"] >= year_from) and (year_to is None or record["year"] is not None and record["year"] <= year_to)]
         records = _rank(_dedupe(records), search_query, sort)[:MAX_EVIDENCE]
         for index, record in enumerate(records, 1):
             record["id"] = f"ev-{index}"

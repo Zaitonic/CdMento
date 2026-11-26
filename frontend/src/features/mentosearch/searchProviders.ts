@@ -27,8 +27,10 @@ export interface SourceConfig {
   name: string;
   description: string;
   defaultEnabled: boolean;
-  search: (query: string, signal: AbortSignal, timeoutMs?: number) => Promise<MentoResult[]>;
+  search: (query: string, signal: AbortSignal, timeoutMs?: number, yearFrom?: number, yearTo?: number) => Promise<MentoResult[]>;
 }
+
+export interface YearRange { yearFrom?: number; yearTo?: number }
 
 const clean = (value: string | undefined | null): string =>
   (value || "").replace(/\s+/g, " ").trim();
@@ -42,9 +44,13 @@ async function searchSemanticScholar(
   query: string,
   signal: AbortSignal,
   timeoutMs?: number,
+  yearFrom?: number,
+  yearTo?: number,
 ): Promise<MentoResult[]> {
-  const url =
-    "/api/v1/search/semantic?query=" + encodeURIComponent(query);
+  const params = new URLSearchParams();
+  if (yearFrom) params.set("year_from", String(yearFrom));
+  if (yearTo) params.set("year_to", String(yearTo));
+  const url = "/api/v1/search/semantic?query=" + encodeURIComponent(query) + (params.size ? `&${params}` : "");
   const timeout = timeoutMs ? new AbortController() : null;
   const timer = timeout ? setTimeout(() => timeout.abort(), timeoutMs) : null;
   const combinedSignal = timeout
@@ -83,8 +89,13 @@ async function searchArxiv(
   query: string,
   signal: AbortSignal,
   timeoutMs?: number,
+  yearFrom?: number,
+  yearTo?: number,
 ): Promise<MentoResult[]> {
-  const url = "/api/v1/search/arxiv?query=" + encodeURIComponent(query);
+  const params = new URLSearchParams();
+  if (yearFrom) params.set("year_from", String(yearFrom));
+  if (yearTo) params.set("year_to", String(yearTo));
+  const url = "/api/v1/search/arxiv?query=" + encodeURIComponent(query) + (params.size ? `&${params}` : "");
   const timeout = timeoutMs ? new AbortController() : null;
   const timer = timeout ? setTimeout(() => timeout.abort(), timeoutMs) : null;
   const combinedSignal = timeout
@@ -123,10 +134,15 @@ async function searchPubMed(
   query: string,
   signal: AbortSignal,
   timeoutMs?: number,
+  yearFrom?: number,
+  yearTo?: number,
 ): Promise<MentoResult[]> {
+  const term = yearFrom || yearTo
+    ? `(${query}) AND (${yearFrom || 1900}[Date - Publication] : ${yearTo || 2200}[Date - Publication])`
+    : query;
   const searchUrl =
     "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&retmax=15&term=" +
-    encodeURIComponent(query);
+    encodeURIComponent(term);
   const timeout = timeoutMs ? new AbortController() : null;
   const timer = timeout ? setTimeout(() => timeout.abort(), timeoutMs) : null;
   const combinedSignal = timeout
@@ -179,10 +195,15 @@ async function searchEuropePMC(
   query: string,
   signal: AbortSignal,
   timeoutMs?: number,
+  yearFrom?: number,
+  yearTo?: number,
 ): Promise<MentoResult[]> {
+  const filteredQuery = yearFrom || yearTo
+    ? `(${query}) AND PUB_YEAR:[${yearFrom || '*'} TO ${yearTo || '*'}]`
+    : query;
   const url =
     "https://www.ebi.ac.uk/europepmc/webservices/rest/search?format=json&resultType=core&pageSize=15&query=" +
-    encodeURIComponent(query);
+    encodeURIComponent(filteredQuery);
   const timeout = timeoutMs ? new AbortController() : null;
   const timer = timeout ? setTimeout(() => timeout.abort(), timeoutMs) : null;
   const combinedSignal = timeout
@@ -225,10 +246,13 @@ async function searchCrossref(
   query: string,
   signal: AbortSignal,
   timeoutMs?: number,
+  yearFrom?: number,
+  yearTo?: number,
 ): Promise<MentoResult[]> {
-  const url =
-    "https://api.crossref.org/works?rows=15&select=title,author,abstract,DOI,URL,is-referenced-by-count,published-print,published-online,container-title&query=" +
-    encodeURIComponent(query);
+  const params = new URLSearchParams({ rows: "15", select: "title,author,abstract,DOI,URL,is-referenced-by-count,published-print,published-online,container-title", query });
+  const dateFilters = [yearFrom ? `from-pub-date:${yearFrom}-01-01` : "", yearTo ? `until-pub-date:${yearTo}-12-31` : ""].filter(Boolean);
+  if (dateFilters.length) params.set("filter", dateFilters.join(","));
+  const url = "https://api.crossref.org/works?" + params;
   const timeout = timeoutMs ? new AbortController() : null;
   const timer = timeout ? setTimeout(() => timeout.abort(), timeoutMs) : null;
   const combinedSignal = timeout
@@ -287,9 +311,13 @@ async function searchOpenAlex(
   query: string,
   signal: AbortSignal,
   timeoutMs?: number,
+  yearFrom?: number,
+  yearTo?: number,
 ): Promise<MentoResult[]> {
-  const url =
-    "https://api.openalex.org/works?per-page=15&search=" + encodeURIComponent(query);
+  const params = new URLSearchParams({ "per-page": "15", search: query });
+  const yearFilters = [yearFrom ? `from_publication_date:${yearFrom}-01-01` : "", yearTo ? `to_publication_date:${yearTo}-12-31` : ""].filter(Boolean);
+  if (yearFilters.length) params.set("filter", yearFilters.join(","));
+  const url = "https://api.openalex.org/works?" + params;
   const timeout = timeoutMs ? new AbortController() : null;
   const timer = timeout ? setTimeout(() => timeout.abort(), timeoutMs) : null;
   const combinedSignal = timeout
@@ -400,13 +428,15 @@ export async function runMentoSearch(
   enabledIds: Set<string>,
   signal: AbortSignal,
   timeoutMs?: number,
+  yearFrom?: number,
+  yearTo?: number,
 ): Promise<SearchOutcome> {
   const active = SOURCES.filter((source) => enabledIds.has(source.id));
   if (!active.length) {
     throw new Error("Enable at least one trusted source to search.");
   }
   const settled = await Promise.allSettled(
-    active.map((source) => source.search(query, signal, timeoutMs)),
+    active.map((source) => source.search(query, signal, timeoutMs, yearFrom, yearTo)),
   );
   const failedSources: string[] = [];
   const groups: MentoResult[][] = [];
@@ -420,7 +450,10 @@ export async function runMentoSearch(
   const succeededCount = settled.length - failedSources.length;
   const seen = new Set<string>();
   const unique: MentoResult[] = [];
-  for (const result of interleave(groups)) {
+  for (const result of interleave(groups).filter((result) =>
+    (yearFrom === undefined || (result.year !== undefined && result.year >= yearFrom)) &&
+    (yearTo === undefined || (result.year !== undefined && result.year <= yearTo)),
+  )) {
     const key = dedupeKey(result);
     if (seen.has(key)) continue;
     seen.add(key);

@@ -136,6 +136,15 @@ describe("MentoSearch providers", () => {
     );
   });
 
+  it("sends native year bounds and defensively excludes out-of-range records", async () => {
+    const { results } = await runMentoSearch(
+      "spaced repetition", new Set(["crossref"]), new AbortController().signal, 30_000, 2020, 2022,
+    );
+    expect(results.map((paper) => paper.year)).toEqual([2021]);
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.searchParams.get("filter")).toBe("from-pub-date:2020-01-01,until-pub-date:2022-12-31");
+  });
+
   it("reconstructs OpenAlex abstracts and normalises DOIs", async () => {
     const { results } = await runMentoSearch(
       "spaced repetition",

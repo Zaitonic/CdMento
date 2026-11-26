@@ -127,6 +127,7 @@ describe("MentoSearch page", () => {
     const user = userEvent.setup();
     render(<MentoSearchPage />);
     await search(user);
+    await user.click(await screen.findByRole("tab", { name: /Answer/ }));
 
     expect(await screen.findByText("IT Fundamentals")).toBeTruthy();
     expect(screen.getByText(/Information technology covers hardware/)).toBeTruthy();
@@ -156,6 +157,7 @@ describe("MentoSearch page", () => {
     const user = userEvent.setup();
     render(<MentoSearchPage />);
     await search(user);
+    await user.click(await screen.findByRole("tab", { name: /Answer/ }));
 
     await user.click(
       (
@@ -175,6 +177,7 @@ describe("MentoSearch page", () => {
     });
     render(<MentoSearchPage />);
     await search(user);
+    await user.click(await screen.findByRole("tab", { name: /Answer/ }));
 
     expect(
       await screen.findByText(/AI overview was unavailable/),
@@ -201,6 +204,7 @@ describe("MentoSearch page", () => {
     });
     render(<MentoSearchPage />);
     await search(user);
+    await user.click(await screen.findByRole("tab", { name: /Answer/ }));
 
     expect(await screen.findByText(/No matching papers were found/)).toBeTruthy();
   });
@@ -213,6 +217,7 @@ describe("MentoSearch page", () => {
     });
     render(<MentoSearchPage />);
     await search(user);
+    await user.click(await screen.findByRole("tab", { name: /Answer/ }));
 
     expect(
       await screen.findByText("Cached answer from a recent search."),
@@ -226,13 +231,14 @@ describe("MentoSearch page", () => {
     );
     render(<MentoSearchPage />);
     await search(user);
+    await user.click(await screen.findByRole("tab", { name: /Answer/ }));
 
     expect(
       await screen.findByText("Search sources are unavailable right now."),
     ).toBeTruthy();
   });
 
-  it("loads the paper list only when the Papers tab is opened", async () => {
+  it("loads the paper list immediately and independently of the Answer tab", async () => {
     const user = userEvent.setup();
     vi.mocked(runMentoSearch).mockResolvedValue({
       results: [paper],
@@ -241,14 +247,9 @@ describe("MentoSearch page", () => {
     });
     render(<MentoSearchPage />);
     await search(user);
-    await screen.findByText("IT Fundamentals");
-
-    expect(runMentoSearch).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("tab", { name: /Papers/ }));
 
     expect(
-      await screen.findByText(/Spaced repetition helps long-term recall/),
+      await screen.findByRole("link", { name: /Spaced repetition helps long-term recall/ }),
     ).toBeTruthy();
     expect(screen.getByText(/1 paper for/)).toBeTruthy();
     expect(screen.getByText(/DOI: 10.1\/example/)).toBeTruthy();
@@ -256,6 +257,27 @@ describe("MentoSearch page", () => {
     const [query, sources] = vi.mocked(runMentoSearch).mock.calls[0];
     expect(query).toBe("IT fundamentals");
     expect([...sources]).toEqual(["alpha"]);
+  });
+
+  it("applies a since-year preset immediately to paper search", async () => {
+    const user = userEvent.setup();
+    vi.mocked(runMentoSearch).mockResolvedValue({ results: [paper], failedSources: [], succeededCount: 1 });
+    render(<MentoSearchPage />);
+    await search(user);
+    await user.click(await screen.findByRole("button", { name: `Since ${new Date().getFullYear() - 1}` }));
+    const calls = vi.mocked(runMentoSearch).mock.calls;
+    expect(calls[calls.length - 1][4]).toBe(new Date().getFullYear() - 1);
+  });
+
+  it("shows citation style controls and formatted citations on paper cards", async () => {
+    const user = userEvent.setup();
+    vi.mocked(runMentoSearch).mockResolvedValue({ results: [paper], failedSources: [], succeededCount: 1 });
+    render(<MentoSearchPage />);
+    await search(user);
+    expect((await screen.findByRole("list")).textContent).toContain("Ada Lovelace, Grace Hopper (2020)");
+    expect(screen.getByRole("button", { name: "Copy citation" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy all citations" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Citation style" })).toBeTruthy();
   });
 
   it("orders papers newest first when the newest sort is selected", async () => {
@@ -281,9 +303,7 @@ describe("MentoSearch page", () => {
     await user.click(screen.getByRole("button", { name: /Advanced sources/ }));
     await user.click(screen.getByRole("button", { name: "Newest" }));
     await search(user);
-    await user.click(screen.getByRole("tab", { name: /Papers/ }));
-
-    await screen.findByText(/Interleaving practice beats blocking/);
+    await screen.findByRole("link", { name: /Interleaving practice beats blocking/ });
     const titles = Array.from(container.querySelectorAll(".result-title")).map(
       (node) => node.textContent?.trim(),
     );
@@ -300,8 +320,6 @@ describe("MentoSearch page", () => {
     });
     render(<MentoSearchPage />);
     await search(user);
-    await user.click(await screen.findByRole("tab", { name: /Papers/ }));
-
     expect(
       await screen.findByText(/Alpha is unavailable right now/),
     ).toBeTruthy();
@@ -344,7 +362,6 @@ describe("MentoSearch page", () => {
     await user.click(screen.getByRole("button", { name: /Advanced sources/ }));
     await user.click(screen.getByRole("button", { name: /Alpha/ }));
     await search(user);
-
     expect(
       screen.getByText("Enable at least one trusted source to search."),
     ).toBeTruthy();

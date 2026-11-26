@@ -81,6 +81,43 @@ def test_proxy_rejects_unknown_sources_and_empty_queries(client):
     assert too_long.status_code == 400
 
 
+def test_semantic_proxy_passes_year_filter_and_removes_out_of_range_papers(client):
+    test_client, app = client
+    seen = []
+
+    def handler(request: httpx.Request):
+        seen.append(request.url.params.get("year"))
+        return httpx.Response(200, json={"data": [
+            {"paperId": "old", "year": 2018},
+            {"paperId": "new", "year": 2022},
+            {"paperId": "unknown", "year": None},
+        ]})
+
+    app.state.scholar = ScholarSearch(transport=httpx.MockTransport(handler))
+    response = test_client.get("/api/v1/search/semantic", params={"query": "memory", "year_from": 2020, "year_to": 2023})
+    assert response.status_code == 200
+    assert seen == ["2020-2023"]
+    assert [paper["paperId"] for paper in response.json()["data"]] == ["new"]
+    assert test_client.get("/api/v1/search/arxiv", params={"query": "memory", "year_from": 2024, "year_to": 2020}).status_code == 422
+
+
+def test_evidence_applies_provider_year_filters_and_post_filters():
+    seen = []
+
+    def handler(request: httpx.Request):
+        seen.append(dict(request.url.params))
+        return httpx.Response(200, json={"message": {"items": [
+            {"DOI": "10.1/old", "title": ["Memory study old"], "issued": {"date-parts": [[2019]]}},
+            {"DOI": "10.1/new", "title": ["Memory study new"], "issued": {"date-parts": [[2022]]}},
+        ]}})
+
+    result = ScholarSearch(transport=httpx.MockTransport(handler)).evidence(
+        "memory study", ["crossref"], year_from=2020, year_to=2023,
+    )
+    assert seen[0]["filter"] == "from-pub-date:2020-01-01,until-pub-date:2023-12-31"
+    assert [item["year"] for item in result["evidence"]] == [2022]
+
+
 def test_proxy_reports_upstream_failures_without_leaking_details(client):
     test_client, app = client
 

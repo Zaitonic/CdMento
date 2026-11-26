@@ -1,7 +1,8 @@
 /* MentoSearch — CdMento feature page styles */
 
 .mentosearch-screen {
-  max-width: 860px;
+  width: 100%;
+  max-width: none;
   margin: 0 auto 48px;
   padding: 0 24px;
 }
@@ -276,6 +277,27 @@
   color: var(--muted);
   word-break: break-all;
 }
+
+.papers-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 20px; align-items: start; }
+.papers-content { min-width: 0; }
+.year-filter { display: grid; gap: 7px; position: sticky; top: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); }
+.mobile-year-toggle { display: none; }
+.year-filter-options { display: grid; gap: 7px; }
+.year-filter > button { text-align: left; border: 0; border-radius: 8px; padding: 8px 10px; background: transparent; color: var(--text); cursor: pointer; }
+.year-filter > button:hover, .year-filter > button.active { background: var(--soft); color: var(--primary); font-weight: 700; }
+.custom-year-range { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 6px; align-items: center; }
+.custom-year-range input { width: 100%; min-width: 0; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 8px 6px; }
+.custom-year-range .primary { grid-column: 1 / -1; }
+.year-pill { background: var(--soft); color: var(--primary); border-radius: 999px; padding: 4px 9px; font-weight: 800; }
+.authors-highlight { color: var(--text); font-weight: 600; }
+.citation-block { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--soft); }
+.citation-block p { margin: 0; color: var(--text); font-size: 12px; line-height: 1.6; }
+.citation-author { color: var(--primary); font-weight: 700; }
+.citation-year { color: var(--text); background: var(--surface); font-weight: 800; padding: 1px 4px; border-radius: 4px; }
+.copy-all { display: inline-flex; align-items: center; gap: 6px; }
+.results-header select { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+.year-range-error { grid-column: 1 / -1; color: #b42318; font-size: 12px; }
+.result-header .year-pill { font-size: 12px; }
 
 /* Empty / skeleton states */
 .empty-state {
@@ -711,6 +733,15 @@
 }
 
 @media (max-width: 620px) {
+  .mentosearch-screen { padding: 0 12px; }
+  .papers-layout { display: block; }
+  .year-filter { position: static; margin-bottom: 12px; padding: 10px; }
+  .mobile-year-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; border: 0; background: transparent; color: var(--text); font-weight: 700; }
+  .year-filter-options { display: none; }
+  .year-filter.mobile-expanded .year-filter-options { display: grid; }
+  .custom-year-range { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+  .citation-block { flex-direction: column; }
+  .results-header { flex-wrap: wrap; }
   .answer-header {
     flex-direction: column;
   }
