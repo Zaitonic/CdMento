@@ -277,6 +277,22 @@ describe("MentoSearch page", () => {
     expect([...sources]).toEqual(["alpha"]);
   });
 
+  it("shows one concise provider failure notice without repeating the generic error", async () => {
+    const user = userEvent.setup();
+    vi.mocked(runMentoSearch).mockResolvedValue({
+      results: [paper],
+      failedSources: ["Google Scholar", "Semantic Scholar"],
+      sourceMessages: ["This source is unavailable right now."],
+      succeededCount: 1,
+    });
+    render(<MentoSearchPage />);
+    await search(user);
+
+    expect((await screen.findByRole("status")).textContent).toBe(
+      "Google Scholar, Semantic Scholar are unavailable right now. Results from other sources are shown.",
+    );
+  });
+
   it("applies a since-year preset immediately to paper search", async () => {
     const user = userEvent.setup();
     vi.mocked(runMentoSearch).mockResolvedValue({ results: [paper], failedSources: [], succeededCount: 1 });

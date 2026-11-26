@@ -464,11 +464,17 @@ def _fetch_google_scholar(client, query, serpapi_key, serper_key, year_from=None
                 response = client.post(
                     "https://google.serper.dev/scholar",
                     json={key: value for key, value in args.items() if value is not None},
-                    headers={"X-API-KEY": serper_key},
+                    headers={
+                        "X-API-KEY": serper_key,
+                        "Content-Type": "application/json",
+                    },
                 )
                 response.raise_for_status()
                 body = response.json()
-                return body.get("organic", body.get("organic_results", []))
+                if not isinstance(body, dict):
+                    return []
+                organic = body.get("organic") or body.get("organic_results") or []
+                return organic if isinstance(organic, list) else []
             except (httpx.HTTPStatusError, httpx.TransportError) as error:
                 last_error = error
         raise last_error or RuntimeError("Google Scholar search failed.")
@@ -482,26 +488,58 @@ def _fetch_google_scholar(client, query, serpapi_key, serper_key, year_from=None
 
     records = []
     for item in items:
+        if not isinstance(item, dict):
+            continue
         publication = item.get("publication_info") or item.get("publicationInfo") or {}
-        authors_data = publication.get("authors") or item.get("authors") or []
+        if isinstance(publication, dict):
+            summary = str(publication.get("summary") or "")
+            venue = publication.get("venue") or summary
+            authors_data = publication.get("authors") or item.get("authors") or []
+            publication_year = publication.get("year")
+        elif isinstance(publication, str):
+            summary = publication
+            parts = re.split(r"\s+[–—-]\s+", publication.strip(), maxsplit=1)
+            authors_data = item.get("authors") or (parts[0].split(",") if len(parts) > 1 else [])
+            venue = parts[1] if len(parts) > 1 else ""
+            publication_year = None
+        else:
+            summary, venue, publication_year = "", "", None
+            authors_data = item.get("authors") or []
+        if isinstance(authors_data, str):
+            authors_data = [author.strip() for author in re.split(r"[,;]", authors_data) if author.strip()]
+        elif isinstance(authors_data, dict):
+            authors_data = [authors_data]
+        elif not isinstance(authors_data, list):
+            authors_data = []
         authors = [
-            author.get("name", "") if isinstance(author, dict) else str(author)
+            str(author.get("name") or "") if isinstance(author, dict) else str(author or "")
             for author in authors_data
         ]
-        summary = publication.get("summary", "")
-        year = item.get("year") or _year(summary)
-        cited_by = item.get("inline_links", {}).get("cited_by", {})
-        if not isinstance(cited_by, dict):
-            cited_by = {}
+        year = item.get("year") or publication_year or _year(summary)
+        cited_by = item.get("citedBy") or item.get("cited_by")
+        if not cited_by:
+            inline_links = item.get("inline_links")
+            cited_by = inline_links.get("cited_by") if isinstance(inline_links, dict) else None
+        citation_count = cited_by.get("total") if isinstance(cited_by, dict) else cited_by
+        if citation_count is None:
+            citation_count = item.get("cited_by")
+        try:
+            citation_count = int(citation_count) if citation_count is not None else None
+        except (TypeError, ValueError):
+            citation_count = None
+        venue = str(venue or summary)
+        if isinstance(publication, str):
+            venue = re.sub(r"\s+-\s+.*$", "", venue)
+            venue = re.sub(r"[, ]+(?:19|20|21)\d{2}\b.*$", "", venue).strip(" ,.-")
         record = _record(
             "google_scholar",
-            item.get("title"),
-            item.get("link") or item.get("url", ""),
+            str(item.get("title") or ""),
+            str(item.get("link") or item.get("url") or item.get("pdfUrl") or ""),
             authors=authors,
             year=_year(year),
-            venue=publication.get("venue") or summary,
-            abstract=item.get("snippet", ""),
-            citations=cited_by.get("total") or item.get("cited_by"),
+            venue=venue,
+            abstract=str(item.get("snippet") or ""),
+            citations=citation_count,
         )
         if record:
             records.append(record)

@@ -145,7 +145,17 @@ export function searchBrief(
     method: "POST",
     body: json({
       query, sources, sort, year_from: yearFrom, year_to: yearTo,
-      papers: papers.map(({ sourceId, ...paper }) => ({ ...paper, source: sourceId })),
+      papers: papers.map(({ sourceId, ...paper }) => ({
+        ...paper,
+        id: paper.id.slice(0, 200),
+        source: sourceId,
+        title: paper.title.slice(0, 500),
+        venue: paper.venue?.slice(0, 300),
+        doi: paper.doi?.slice(0, 300),
+        url: paper.url.slice(0, 2000),
+        abstract: paper.abstract?.slice(0, 3000),
+        authors: paper.authors.slice(0, 50),
+      })),
     }),
     signal,
   }, timeoutMs);

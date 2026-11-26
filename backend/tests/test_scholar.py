@@ -1,4 +1,5 @@
 import httpx
+import json
 import pytest
 from fastapi.testclient import TestClient
 from backend.config import Settings
@@ -138,6 +139,74 @@ def test_google_scholar_proxy_normalizes_serpapi_results_and_years(client):
     assert seen[0]["as_ylo"] == "2020" and seen[0]["as_yhi"] == "2024"
     assert seen[0]["scisbd"] == "1"
     assert "server-secret" not in response.text
+
+
+def test_google_scholar_serper_parses_publication_info_and_sends_json(client):
+    test_client, app = client
+    seen = []
+
+    def handler(request: httpx.Request):
+        seen.append(request)
+        return httpx.Response(200, json={"organic": [{
+            "title": "IT fundamentals",
+            "link": "https://example.org/it-fundamentals",
+            "publicationInfo": "Ada Lovelace, Grace Hopper - Journal of IT, 2023",
+            "snippet": "An introduction to information technology.",
+            "citedBy": {"total": 18},
+            "pdfUrl": "https://example.org/it-fundamentals.pdf",
+        }]})
+
+    app.state.scholar = ScholarSearch(
+        transport=httpx.MockTransport(handler), serper_api_key="server-secret"
+    )
+    response = test_client.get("/api/v1/search/google_scholar", params={
+        "q": "IT fundamentals", "year_from": 2023,
+    })
+
+    assert response.status_code == 200, response.text
+    paper = response.json()["data"][0]
+    assert paper["title"] == "IT fundamentals"
+    assert paper["authors"] == ["Ada Lovelace", "Grace Hopper"]
+    assert paper["year"] == 2023
+    assert paper["venue"] == "Journal of IT"
+    assert paper["citations"] == 18
+    assert paper["abstract"] == "An introduction to information technology."
+    assert paper["url"] == "https://example.org/it-fundamentals"
+    assert seen[0].method == "POST"
+    assert str(seen[0].url) == "https://google.serper.dev/scholar"
+    assert seen[0].headers["x-api-key"] == "server-secret"
+    assert seen[0].headers["content-type"] == "application/json"
+    assert seen[0].read() == b'{"q":"IT fundamentals","as_ylo":2023}'
+    assert "server-secret" not in response.text
+
+
+def test_serper_retries_without_rejected_year_parameters_and_post_filters(client):
+    test_client, app = client
+    seen = []
+
+    def handler(request: httpx.Request):
+        body = json.loads(request.content)
+        seen.append(body)
+        if "as_ylo" in body:
+            return httpx.Response(400, json={"message": "unsupported year filter"})
+        return httpx.Response(200, json={"organic": [
+            {"title": "Old IT study", "year": 2022, "link": "https://example.org/old"},
+            {"title": "Current IT study", "year": 2023, "link": "https://example.org/current"},
+        ]})
+
+    app.state.scholar = ScholarSearch(
+        transport=httpx.MockTransport(handler), serper_api_key="server-secret"
+    )
+    response = test_client.get("/api/v1/search/google_scholar", params={
+        "q": "IT fundamentals", "year_from": 2023,
+    })
+
+    assert response.status_code == 200
+    assert seen == [
+        {"q": "IT fundamentals", "as_ylo": 2023},
+        {"q": "IT fundamentals"},
+    ]
+    assert [paper["year"] for paper in response.json()["data"]] == [2023]
 
 
 def test_papers_source_proxy_returns_the_same_normalized_record_shape(client):

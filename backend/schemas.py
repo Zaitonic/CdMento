@@ -432,9 +432,14 @@ class ReviewerNoteOptions(Input):
         return self
 
 
+SearchSource = Literal[
+    "semantic", "crossref", "openalex", "europepmc", "arxiv", "pubmed", "google_scholar"
+]
+
+
 class SearchBriefPaper(Input):
     id: str = Field(min_length=1, max_length=200)
-    source: Literal["semantic", "crossref", "openalex", "europepmc", "arxiv", "pubmed", "google_scholar"]
+    source: SearchSource
     title: str = Field(min_length=1, max_length=500)
     authors: list[str] = Field(default_factory=list, max_length=50)
     year: int | None = Field(default=None, ge=1900, le=2200)
@@ -447,7 +452,7 @@ class SearchBriefPaper(Input):
 
 class SearchBriefInput(Input):
     query: str = Field(min_length=2, max_length=200)
-    sources: list[str] = Field(default_factory=list, max_length=7)
+    sources: list[SearchSource] = Field(default_factory=list, max_length=7)
     sort: Literal["relevance", "newest"] = "relevance"
     year_from: int | None = Field(default=None, ge=1900, le=2200)
     year_to: int | None = Field(default=None, ge=1900, le=2200)

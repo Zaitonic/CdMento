@@ -647,11 +647,18 @@ export default function MentoSearchPage() {
       prefs.sort === 'newest'
         ? [...papers].sort((a, b) => (b.year ?? 0) - (a.year ?? 0))
         : papers;
+    const uniqueSourceMessages = [...new Set(sourceMessages)];
     const unreportedFailedSources = failedSources.filter(
       (name) => !sourceMessages.some((message) => message.startsWith(name)),
     );
+    const hasGenericFailure = uniqueSourceMessages.some((message) =>
+      /^this source is unavailable right now\.?$/i.test(message.trim()),
+    );
+    const usefulSourceMessages = uniqueSourceMessages.filter((message) =>
+      !(hasGenericFailure && unreportedFailedSources.length > 0 && /^this source is unavailable right now\.?$/i.test(message.trim())),
+    );
     const noticeMessages = [
-      ...sourceMessages,
+      ...usefulSourceMessages,
       ...(unreportedFailedSources.length > 0
         ? [`${unreportedFailedSources.join(', ')} ${unreportedFailedSources.length === 1 ? 'is' : 'are'} unavailable right now. Results from other sources are shown.`]
         : []),

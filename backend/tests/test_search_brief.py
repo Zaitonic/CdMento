@@ -168,6 +168,39 @@ def test_brief_uses_the_fetched_papers_as_its_exact_evidence(client):
     }]
 
 
+def test_brief_accepts_all_seven_sources_with_year_range_and_shared_papers(client):
+    test_client, _, _ = client
+    sources = [
+        "semantic", "crossref", "openalex", "europepmc", "arxiv", "pubmed",
+        "google_scholar",
+    ]
+    papers = [{
+        "id": f"paper-{source}",
+        "source": source,
+        "title": f"Information technology fundamentals via {source}",
+        "authors": ["Ada Lovelace"],
+        "year": 2023,
+        "venue": "Journal of IT",
+        "url": f"https://example.org/{source}",
+        "abstract": "A short abstract.",
+        "citations": 4,
+    } for source in sources]
+
+    response = test_client.post(
+        "/api/v1/search/brief",
+        json=brief_payload(
+            sources=sources,
+            year_from=2023,
+            year_to=2024,
+            papers=papers,
+        ),
+    )
+
+    assert response.status_code == 200, response.json()
+    assert {paper["source"] for paper in response.json()["evidence"]} == set(sources)
+    assert all(paper["year"] == 2023 for paper in response.json()["evidence"])
+
+
 def test_brief_is_cached_per_owner_and_query(client):
     test_client, _, services = client
 
@@ -199,8 +232,8 @@ def test_brief_rejects_unknown_sources(client):
         "/api/v1/search/brief", json=brief_payload(sources=["bing"])
     )
 
-    assert response.status_code == 400
-    assert "search source" in response.json()["error"]
+    assert response.status_code == 422
+    assert any(field["field"] == "body.sources.0" for field in response.json()["fields"])
 
 
 def test_brief_rate_limits_ten_per_hour(client):
