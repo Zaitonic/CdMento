@@ -144,7 +144,8 @@ class OpenAICompatibleClient:
             transport=self.transport,
             timeout=httpx.Timeout(
                 timeout_seconds or self.provider.timeout_seconds,
-                connect=min(10, timeout_seconds or self.provider.timeout_seconds),
+                connect=min(5, timeout_seconds or self.provider.timeout_seconds),
+                read=min(25, timeout_seconds or self.provider.timeout_seconds),
             ),
             verify=ssl.create_default_context(),
             follow_redirects=False,
@@ -214,7 +215,40 @@ class Gateway:
         self.providers = []
         self.model_checks = {}
         self.problem = ""
+        self.freellmapi_diagnostic = {
+            "status": "disabled",
+            "model": settings.freellmapi_model,
+            "message": "FreeLLMAPI is disabled.",
+            "last_latency_ms": None,
+        }
+        vercel = os.getenv("VERCEL") == "1" or bool(os.getenv("VERCEL_ENV"))
+        freellmapi_url = settings.freellmapi_base_url.strip().rstrip("/")
+        parsed_freellmapi_url = urlsplit(freellmapi_url)
+        local_router = parsed_freellmapi_url.hostname in {"localhost", "127.0.0.1"}
+        if settings.freellmapi_enabled:
+            diagnostic_error = None
+            if vercel and local_router:
+                diagnostic_error = "Localhost URL cannot be reached from Vercel; configure a public HTTPS proxy URL"
+            elif not settings.freellmapi_api_key:
+                diagnostic_error = "FREELLMAPI_API_KEY is missing"
+            elif not settings.freellmapi_model.strip():
+                diagnostic_error = "FREELLMAPI_MODEL is empty"
+            elif not settings.freellmapi_free_tier_confirmed:
+                diagnostic_error = "FREELLMAPI_FREE_TIER_CONFIRMED must be true"
+            elif not parsed_freellmapi_url.hostname or parsed_freellmapi_url.username or parsed_freellmapi_url.password or parsed_freellmapi_url.query or parsed_freellmapi_url.fragment:
+                diagnostic_error = "FREELLMAPI_BASE_URL is invalid"
+            elif parsed_freellmapi_url.scheme != "https" and not (
+                not vercel and settings.data_backend == "sqlite"
+                and parsed_freellmapi_url.scheme == "http" and local_router
+            ):
+                diagnostic_error = "FREELLMAPI_BASE_URL must use HTTPS outside local development"
+            if diagnostic_error:
+                self.freellmapi_diagnostic.update(status="misconfigured", message=diagnostic_error)
+                log.warning("FreeLLMAPI misconfigured: %s", diagnostic_error)
+            else:
+                self.freellmapi_diagnostic.update(status="active", message="Configured; connectivity is checked on AI requests.")
         if not settings.ai_enabled:
+            self.freellmapi_diagnostic.update(status="disabled", message="AI is disabled on this server.")
             self.problem = "AI is disabled on this server."
             return
         if not any(
@@ -232,39 +266,22 @@ class Gateway:
             self.problem = "Add a Groq, OpenRouter, or Cloudflare key to the server .env file to enable AI."
             return
         if not settings.ai_free_tier_confirmed:
+            if self.freellmapi_diagnostic["status"] == "active":
+                self.freellmapi_diagnostic.update(status="misconfigured", message="AI_FREE_TIER_CONFIRMED must be true")
             self.problem = "Confirm unbilled/free-plan provider accounts in the server configuration first."
             return
-        if settings.freellmapi_enabled:
-            if not settings.freellmapi_api_key:
-                log.warning("Skipping FreeLLMAPI: FREELLMAPI_API_KEY is missing")
-            elif not settings.freellmapi_model.strip():
-                log.warning("Skipping FreeLLMAPI: FREELLMAPI_MODEL is empty")
-            elif not settings.freellmapi_free_tier_confirmed:
-                log.warning("Skipping FreeLLMAPI: free-tier confirmation is required")
-            else:
-                parsed_url = urlsplit(settings.freellmapi_base_url.rstrip("/"))
-                local_router = parsed_url.hostname in {"localhost", "127.0.0.1"}
-                if parsed_url.scheme != "https" and not (
-                    settings.data_backend == "sqlite"
-                    and os.getenv("VERCEL") != "1"
-                    and parsed_url.scheme == "http"
-                    and local_router
-                ):
-                    log.warning("Skipping FreeLLMAPI: base URL must use HTTPS outside local development")
-                elif not parsed_url.hostname or parsed_url.username or parsed_url.password or parsed_url.query or parsed_url.fragment:
-                    log.warning("Skipping FreeLLMAPI: invalid base URL")
-                else:
-                    self.providers.append(
-                        Provider(
-                            "freellmapi",
-                            settings.freellmapi_model,
-                            settings.freellmapi_api_key,
-                            settings.ai_daily_requests,
-                            settings.freellmapi_base_url.rstrip("/"),
-                            {},
-                            settings.ai_request_timeout_seconds,
-                        )
-                    )
+        if self.freellmapi_diagnostic["status"] == "active":
+            self.providers.append(
+                Provider(
+                    "freellmapi",
+                    settings.freellmapi_model,
+                    settings.freellmapi_api_key,
+                    settings.ai_daily_requests,
+                    freellmapi_url,
+                    {},
+                    min(30, settings.ai_request_timeout_seconds),
+                )
+            )
         if settings.groq_api_key:
             if settings.groq_model not in {"openai/gpt-oss-120b", "openai/gpt-oss-20b"}:
                 self.problem = "Groq model is outside the approved free-plan allowlist."
@@ -346,6 +363,8 @@ class Gateway:
             self.providers.append(Provider(extra.name, extra.model, extra.api_key, settings.ai_daily_requests, extra.base_url, extra.extra_headers, extra.timeout_seconds))
             existing.add(extra.name)
         order = [name.strip() for name in settings.ai_provider_order.split(",") if name.strip()]
+        if not order:
+            order = ["cloudflare", "freellmapi", "groq", "openrouter"]
         if order:
             by_name = {p.name: p for p in self.providers}
             self.providers = [by_name[name] for name in order if name in by_name]
@@ -467,6 +486,12 @@ class Gateway:
                 }
             if p.name == "freellmapi" and (p.base_url, p.model) in self.model_checks:
                 provider_status["model_verified"] = self.model_checks[(p.base_url, p.model)][1]
+            if p.name == "freellmapi":
+                if provider_status["health"] == "unavailable":
+                    self.freellmapi_diagnostic.update(status="unreachable", message="FreeLLMAPI is unreachable or rejected the request; the gateway will use the next provider.")
+                elif provider_status["health"] == "healthy":
+                    self.freellmapi_diagnostic.update(status="active", message="FreeLLMAPI responded successfully.")
+                self.freellmapi_diagnostic["last_latency_ms"] = provider_status["last_latency_ms"]
             providers.append(provider_status)
         state = "unconfigured"
         message = self.problem
@@ -502,6 +527,8 @@ class Gateway:
             "message": message,
             "retry_at": retry_at,
             "providers": providers,
+            "freellmapi": {**self.freellmapi_diagnostic},
+            "fallback_order": [p.name for p in self.providers],
         }
 
     def retry_seconds(self, response):

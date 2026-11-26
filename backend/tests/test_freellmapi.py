@@ -57,6 +57,69 @@ def test_localhost_router_is_rejected_in_vercel(tmp_path, monkeypatch):
     assert not Gateway(cfg, Repository(tmp_path)).configured
 
 
+def test_vercel_env_reports_localhost_diagnostic_and_skips_provider(tmp_path, monkeypatch):
+    monkeypatch.delenv("VERCEL", raising=False)
+    monkeypatch.setenv("VERCEL_ENV", "production")
+    cfg = settings(tmp_path, groq_api_key="groq-secret")
+    gateway = Gateway(cfg, Repository(tmp_path))
+    status = gateway.status()
+    assert "freellmapi" not in [provider.name for provider in gateway.providers]
+    assert status["freellmapi"]["status"] == "misconfigured"
+    assert status["freellmapi"]["message"] == (
+        "Localhost URL cannot be reached from Vercel; configure a public HTTPS proxy URL"
+    )
+    assert "router-secret" not in json.dumps(status)
+
+
+def test_public_https_url_is_normalized_and_used_for_models_and_completion(tmp_path):
+    cfg = settings(tmp_path, freellmapi_base_url="https://proxy.example.test/v1///")
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "ministral-8b-latest"}]})
+        return httpx.Response(
+            200,
+            json={"choices": [{"finish_reason": "stop", "message": {"content": '{"answer":"ok","citations":[],"source_ids":[]}'}}]},
+        )
+
+    gateway = Gateway(cfg, Repository(tmp_path), httpx.MockTransport(handler), clock=lambda: 1000)
+    assert gateway.providers[0].base_url == "https://proxy.example.test/v1"
+    gateway.complete(GroundedAnswer, "system", "question")
+    assert calls == ["/v1/models", "/v1/chat/completions"]
+
+
+def test_default_provider_order_keeps_fast_fallback_chain(tmp_path):
+    cfg = settings(
+        tmp_path,
+        cloudflare_api_token="c" * 40,
+        cloudflare_account_id="a" * 32,
+        cloudflare_free_tier_confirmed=True,
+        groq_api_key="groq-secret",
+        openrouter_api_key="openrouter-secret",
+        openrouter_model="provider/model:free",
+    )
+    gateway = Gateway(cfg, Repository(tmp_path))
+    assert [provider.name for provider in gateway.providers] == [
+        "cloudflare", "freellmapi", "groq", "openrouter"
+    ]
+
+
+def test_freellmapi_timeouts_are_bounded():
+    provider = Provider("freellmapi", "model", "secret", 10, "https://proxy.test/v1", timeout_seconds=45)
+
+    def handler(request):
+        timeout = request.extensions["timeout"]
+        assert timeout["connect"] == 5
+        assert timeout["read"] == 25
+        return httpx.Response(200, json={"ok": True})
+
+    OpenAICompatibleClient(provider, httpx.MockTransport(handler)).complete(
+        [{"role": "user", "content": "test"}]
+    )
+
+
 def test_streamed_openai_response_is_assembled(tmp_path):
     provider = Provider("freellmapi", "ministral-8b-latest", "router-secret", 10, "http://127.0.0.1:3001/v1")
 
