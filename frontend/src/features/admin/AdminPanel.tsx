@@ -757,6 +757,9 @@ export default function AdminPanel() {
                   <div className="admin-search-bar">
                     <Search size={14} className="text-gray-400" />
                     <input
+                      id="admin-access-search"
+                      name="access-search"
+                      aria-label="Search login and access logs"
                       placeholder="Search email, IP, auth..."
                       value={accessSearch}
                       onChange={(e) => {
@@ -766,6 +769,9 @@ export default function AdminPanel() {
                     />
                   </div>
                   <select
+                    id="admin-access-status"
+                    name="access-status"
+                    aria-label="Filter access logs by status"
                     className="admin-select"
                     value={accessStatus}
                     onChange={(e) => {
@@ -892,6 +898,9 @@ export default function AdminPanel() {
                   <div className="admin-search-bar">
                     <Search size={14} className="text-gray-400" />
                     <input
+                      id="admin-activity-search"
+                      name="activity-search"
+                      aria-label="Search activity logs"
                       placeholder="Search activity..."
                       value={activitySearch}
                       onChange={(e) => {
@@ -990,6 +999,9 @@ export default function AdminPanel() {
                 </div>
                 <div className="admin-card-header-actions">
                   <select
+                    id="admin-feedback-status"
+                    name="feedback-status"
+                    aria-label="Filter feedback by status"
                     className="admin-select"
                     value={feedbackStatus}
                     onChange={(e) => setFeedbackStatus(e.target.value)}
@@ -1251,7 +1263,7 @@ export default function AdminPanel() {
             </div>
             <div className="admin-modal-body">
               <div>
-                <label className="text-xs font-semibold text-gray-500">
+                <label className="text-xs font-semibold text-gray-500" htmlFor="admin-ticket-status">
                   User Inquiry
                 </label>
                 <p className="text-xs p-3 bg-gray-50 dark:bg-gray-800 rounded mt-1 text-gray-700 dark:text-gray-300">
@@ -1264,6 +1276,8 @@ export default function AdminPanel() {
                   Ticket Status
                 </label>
                 <select
+                  id="admin-ticket-status"
+                  name="ticket-status"
                   className="admin-select w-full mt-1"
                   value={editStatus}
                   onChange={(e) => setEditStatus(e.target.value)}
@@ -1275,10 +1289,12 @@ export default function AdminPanel() {
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-gray-500">
+                <label className="text-xs font-semibold text-gray-500" htmlFor="admin-ticket-notes">
                   Internal Admin Notes
                 </label>
                 <textarea
+                  id="admin-ticket-notes"
+                  name="ticket-notes"
                   className="admin-input w-full mt-1 h-24"
                   placeholder="Add resolution or investigation notes..."
                   value={editNotes}

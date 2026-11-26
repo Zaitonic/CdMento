@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     cloudflare_account_id: str = ""
     cloudflare_model: str = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
     cloudflare_free_tier_confirmed: bool = False
+    freellmapi_enabled: bool = False
     freellmapi_api_key: str = ""
     freellmapi_base_url: str = "http://127.0.0.1:3001/v1"
     freellmapi_model: str = "ministral-8b-latest"
@@ -55,7 +56,7 @@ class Settings(BaseSettings):
     worker_enabled: bool = True
     ocr_enabled: bool = True
     ocr_max_pages: int = Field(default=100, ge=1, le=200)
-    admin_emails: str = "lozadamarklaurence226@gmail.com,admin@cdmento.com,admin@cdmento.local,demo@cdmento.local"
+    admin_emails: str = "lozadamarklaurence226@gmail.com"
 
     def validate_modes(self):
         if self.auth_mode not in ("local", "google", "firebase") or self.data_backend not in (

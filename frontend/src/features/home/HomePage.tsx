@@ -141,6 +141,8 @@ export default function HomePage({ chooseFiles, openModal, onDelete }: Props) {
           <Sparkles size={20} />
         </span>
         <input
+          id="home-question"
+          name="question"
           placeholder="Ask about your sources"
           aria-label="Ask about your sources"
           value={question}

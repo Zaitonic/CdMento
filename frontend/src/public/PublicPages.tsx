@@ -186,6 +186,7 @@ function StudyPreview() {
                 <label htmlFor="preview-note">My programming notes.</label>
                 <textarea
                   id="preview-note"
+                  name="preview-note"
                   value={note}
                   onChange={(e) => edit(e.target.value)}
                   maxLength={1000}
@@ -1257,6 +1258,8 @@ export function AuthPage({ mode }: { mode: "login" | "signup" | "reset" }) {
               <div className="auth-form-options">
                 <label>
                   <input
+                    id="remember-session"
+                    name="remember"
                     type="checkbox"
                     checked={remember}
                     onChange={(e) => setRemember(e.target.checked)}

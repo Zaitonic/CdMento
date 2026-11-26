@@ -1,6 +1,6 @@
 # Free AI setup for CdMento
 
-CdMento can route through **Groq, OpenRouter, Cloudflare Workers AI, Mistral/FreeLLMAPI, Google AI Studio (Gemini), Cerebras, NVIDIA NIM, and any number of additional OpenAI-compatible endpoints**. Providers are chosen in configured order and fall through when one reaches its quota or has a temporary failure. Uploading/extracting/reading documents stays local to the backend and does not call a provider.
+CdMento can route through **Groq, OpenRouter, Cloudflare Workers AI, FreeLLMAPI, Google AI Studio (Gemini), Cerebras, NVIDIA NIM, and any number of additional OpenAI-compatible endpoints**. Providers are chosen in configured order and fall through when one reaches its quota or has a temporary failure. Uploading/extracting/reading documents stays local to the backend and does not call a provider.
 
 ## Configure your own keys
 
@@ -76,22 +76,61 @@ Automated tests use HTTPX mock transports: no live keys, paid calls, or student-
 Live output quality, real account quotas, and account billing eligibility still require verification after you supply your own keys. Redis/Celery deployment needs its own live verification; local SQLite worker mode is used during development.
 
 
-## Local FreeLLMAPI prototype
+## FreeLLMAPI
 
-CdMento can send requests to the separately running router at `http://127.0.0.1:3001/v1`.
-Set `FREELLMAPI_API_KEY` to the router's unified key (not a provider key),
-`FREELLMAPI_MODEL=ministral-8b-latest`, and `FREELLMAPI_FREE_TIER_CONFIRMED=true`
-only after confirming the upstream Mistral account is unbilled Free/Experiment mode.
-The router must remain local and its Mistral model route must remain restricted to Mistral.
-CdMento displays this route as Mistral. Provider selection is automatic.
-Unrestricted `auto` and remote router URLs are rejected. Other configured direct routes remain available.
-The router key stays on the Python server; the browser never receives it.
+FreeLLMAPI is an optional OpenAI-compatible provider. Install and run it separately using its
+[official install guide](https://github.com/tashfeenahmed/freellmapi/blob/main/docs/en/install/01-install.md).
+The upstream project documents Docker Compose and Windows setup, and serves its API on port 3001.
+Create provider keys in its dashboard, then copy its **unified API key** (not an upstream provider key)
+into CdMento's backend environment. Never put it in a `VITE_` variable.
 
-Structured JSON and existing source quote checks remain mandatory. Unsupported responses fail safely.
-The router's current model catalog permits two requests per minute for this model; coding tools and
-CdMento share that allowance. A new key on the same upstream account does not create extra capacity.
-Existing job cooldown/retry behavior respects rate limits. Do not increase catalog limits to bypass quotas.
-The router's advertised billions of tokens are aggregate catalog allowances, not this workspace's quota.
-This remains a local prototype: no production readiness, security audit, or concurrent-user capacity is implied.
+```dotenv
+AI_ENABLED=true
+AI_FREE_TIER_CONFIRMED=true
+FREELLMAPI_ENABLED=true
+FREELLMAPI_API_KEY=freellmapi-your-unified-key
+FREELLMAPI_BASE_URL=http://127.0.0.1:3001/v1
+FREELLMAPI_MODEL=ministral-8b-latest
+FREELLMAPI_FREE_TIER_CONFIRMED=true
+AI_PROVIDER_ORDER=cloudflare,freellmapi,groq,openrouter
+```
 
-Live reviewer output from the pinned Mistral model included unsupported examples despite valid citations. Mistral is therefore excluded from reviewer generation. Reviewers use other configured providers, or stop before transmitting material when none is available. Chat, cards, quizzes, and maps remain available through Mistral.
+The provider order is a priority list; other configured providers are appended automatically.
+Restart the backend after changing environment values. Before choosing the model, check the proxy's
+actual catalog with `GET /v1/models` and use an ID returned by that server. CdMento checks this list
+when available; if the endpoint is unsupported, model validation is deferred to the completion
+request and failures fall through safely. FreeLLMAPI's OpenAI-compatible streaming responses are
+collected server-side so CdMento can continue validating complete structured JSON before returning it.
+
+`127.0.0.1` works when CdMento's backend and FreeLLMAPI run on the same host. If the backend is in a
+container, its loopback is the container; configure a host-reachable URL such as
+`http://host.docker.internal:3001/v1` and make sure the FreeLLMAPI listener accepts that connection.
+Do not expose the proxy dashboard or unified key to the public internet. Vercel cannot reach a
+developer computer's loopback address: a Vercel deployment would require a separately hosted,
+HTTPS-reachable proxy URL and a server-side key. The upstream FreeLLMAPI project describes itself as
+single-user and intended for personal experimentation, not production; review provider terms and
+the proxy's security posture before routing a multi-user CdMento deployment through it.
+
+The API key remains on the backend. Provider status reports recent health, latency, cooldowns, and
+failure counts without returning credentials or raw upstream error bodies. No live proxy connection
+is claimed unless a running instance is reachable and verified.
+
+### Windows Docker Compose quick start
+
+From PowerShell, follow the upstream Compose setup and generate a fresh encryption key for the
+proxy's local key database:
+
+```powershell
+git clone https://github.com/tashfeenahmed/freellmapi.git
+Set-Location freellmapi
+$bytes = New-Object Byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+$encryptionKey = -join ($bytes | ForEach-Object { '{0:x2}' -f $_ })
+@("ENCRYPTION_KEY=$encryptionKey", 'PORT=3001') | Set-Content -Encoding ascii .env
+docker compose up -d
+```
+
+Open `http://localhost:3001`, configure upstream keys in its dashboard, and copy the unified API
+key into CdMento's backend `.env`. Check that the selected model appears in `/v1/models` before
+using it. Stop the proxy with `docker compose down` (without `-v` to preserve its data volume),
+and view logs with `docker compose logs -f freellmapi`.

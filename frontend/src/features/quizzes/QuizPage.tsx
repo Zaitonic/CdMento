@@ -305,8 +305,10 @@ export default function Quiz() {
               </div>
               {wizardStep === 0 ? (
                 <div className="wizard-step-content">
-                  <label className="field-label">Quiz title</label>
+                  <label className="field-label" htmlFor="quiz-title">Quiz title</label>
                   <input
+                    id="quiz-title"
+                    name="title"
                     className="field-input"
                     value={quizTitle}
                     onChange={(e) => setQuizTitle(e.target.value)}
@@ -342,8 +344,10 @@ export default function Quiz() {
                   </p>
                   <div className="card-form-row">
                     <div className="input-group full">
-                      <label className="field-label">Question</label>
+                      <label className="field-label" htmlFor="manual-quiz-question">Question</label>
                       <input
+                        id="manual-quiz-question"
+                        name="question"
                         className="field-input"
                         value={qQuestion}
                         onChange={(e) => setQQuestion(e.target.value)}
@@ -354,8 +358,10 @@ export default function Quiz() {
                   <div className="options-grid">
                     {["A", "B", "C", "D"].map((letter, i) => (
                       <div key={letter} className="input-group">
-                        <label className="field-label">Option {letter}</label>
+                        <label className="field-label" htmlFor={`manual-quiz-option-${letter}`}>Option {letter}</label>
                         <input
+                          id={`manual-quiz-option-${letter}`}
+                          name={`option-${letter.toLowerCase()}`}
                           className="field-input"
                           value={qOptions[i]}
                           onChange={(e) =>
@@ -370,8 +376,10 @@ export default function Quiz() {
                     ))}
                   </div>
                   <div className="input-group full">
-                    <label className="field-label">Correct answer</label>
+                    <label className="field-label" htmlFor="manual-quiz-correct">Correct answer</label>
                     <select
+                      id="manual-quiz-correct"
+                      name="correct-answer"
                       value={qCorrect}
                       onChange={(e) => setQCorrect(Number(e.target.value))}
                     >
@@ -382,8 +390,10 @@ export default function Quiz() {
                     </select>
                   </div>
                   <div className="input-group full">
-                    <label className="field-label">Explanation</label>
+                    <label className="field-label" htmlFor="manual-quiz-explanation">Explanation</label>
                     <input
+                      id="manual-quiz-explanation"
+                      name="explanation"
                       className="field-input"
                       value={qExplanation}
                       onChange={(e) => setQExplanation(e.target.value)}
@@ -391,8 +401,10 @@ export default function Quiz() {
                     />
                   </div>
                   <div className="input-group full">
-                    <label className="field-label">Concept / topic</label>
+                    <label className="field-label" htmlFor="manual-quiz-concept">Concept / topic</label>
                     <input
+                      id="manual-quiz-concept"
+                      name="concept"
                       className="field-input"
                       value={qConcept}
                       onChange={(e) => setQConcept(e.target.value)}

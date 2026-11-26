@@ -563,6 +563,8 @@ export default function MentoSearchPage() {
         <form className="search-form" onSubmit={handleSubmit}>
           <Search size={20} />
           <input
+            id="topic-search"
+            name="query"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Ask about a topic, e.g. “IT fundamentals”"

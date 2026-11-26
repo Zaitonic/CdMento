@@ -41,6 +41,16 @@ def test_verify_reset_and_session_revocation(auth):
     assert auth.login("student@example.com", "replacement-password", "test", False)["profile"]["emailVerified"]
 
 
+def test_wrong_password_for_unverified_account_has_uniform_401(auth):
+    auth.signup("pending@example.com", "correct-password", "Pending", "test")
+    with pytest.raises(HTTPException) as wrong:
+        auth.login("pending@example.com", "wrong-password", "test", False)
+    assert wrong.value.status_code == 401
+    with pytest.raises(HTTPException) as correct:
+        auth.login("pending@example.com", "correct-password", "test", False)
+    assert correct.value.status_code == 403
+
+
 def test_failed_delivery_preserves_previous_link(auth):
     auth.signup("student@example.com", "original-password", "Student", "test")
     token = last_token(auth)

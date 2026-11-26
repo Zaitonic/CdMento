@@ -141,6 +141,8 @@ export default function PdfReader({
           </button>
           <label>
             <input
+              id="pdf-page-number"
+              name="page"
               aria-label="PDF page number"
               type="number"
               min={1}

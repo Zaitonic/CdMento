@@ -207,6 +207,10 @@ export default function Focus() {
             }}
           >
             <input
+              id="focus-task"
+              name="task"
+              aria-label="Task to focus on"
+              autoComplete="off"
               placeholder="What’s one thing to work on?"
               value={task}
               maxLength={500}
@@ -220,6 +224,8 @@ export default function Focus() {
             <div className="task" key={t.id}>
               <label>
                 <input
+                  id={`task-done-${t.id}`}
+                  name="task-complete"
                   type="checkbox"
                   checked={t.done}
                   onChange={async () => {

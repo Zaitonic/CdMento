@@ -159,13 +159,12 @@ class PasswordAuth:
         self._throttle(("login", client), 10, 600, "Too many sign-in attempts. Please wait ten minutes.")
         email = email.strip().casefold()
         account = self.repo.get(AUTH_OWNER, "accounts", self.email_id(email))
-        # Email verification takes precedence over password verification.
-        if account and not account["email_verified"]:
-            raise HTTPException(403, "Verify your email using the link we sent before signing in.")
         if not account:
             raise HTTPException(401, "The email or password is incorrect. Please try again.")
         if not self._verify_and_migrate(account, password):
             raise HTTPException(401, "The email or password is incorrect. Please try again.")
+        if not account["email_verified"]:
+            raise HTTPException(403, "Verify your email using the link we sent before signing in.")
         if account.get("disabled"):
             raise HTTPException(403, "This account has been disabled. Contact the CdMento administrator.")
         with self.lock:

@@ -299,6 +299,8 @@ export function useArtifacts(kind: string, sourceId?: string) {
         <label>
           Topic
           <input
+            id={`${kind}-topic`}
+            name="topic"
             value={topic}
             maxLength={500}
             placeholder="Key concepts"
@@ -308,6 +310,8 @@ export function useArtifacts(kind: string, sourceId?: string) {
         <label>
           Items
           <input
+            id={`${kind}-item-count`}
+            name="item-count"
             type="number"
             min={1}
             max={30}
@@ -323,6 +327,8 @@ export function useArtifacts(kind: string, sourceId?: string) {
         <label>
           Difficulty
           <select
+            id={`${kind}-difficulty`}
+            name="difficulty"
             value={difficulty}
             onChange={(e) => setDifficulty(e.target.value)}
           >
@@ -373,7 +379,9 @@ export function useArtifacts(kind: string, sourceId?: string) {
               ? "decks"
               : "maps"}
           <select
+            id={`${kind}-saved-item`}
             aria-label="Saved study material"
+            name="saved-item"
             value={active}
             onChange={(e) => setActive(e.target.value)}
           >

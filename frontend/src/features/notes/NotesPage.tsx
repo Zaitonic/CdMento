@@ -187,6 +187,8 @@ export default function Notes() {
           <div className="note-editor">
             <div className="note-header">
               <input
+                id="note-title"
+                name="title"
                 aria-label="Note title"
                 value={note.title}
                 onChange={(e) =>

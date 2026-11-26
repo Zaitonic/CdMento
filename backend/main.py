@@ -5,6 +5,7 @@ truststore.inject_into_ssl()
 import copy
 import hashlib
 import json
+import ipaddress
 import logging
 import os
 import threading
@@ -137,7 +138,8 @@ Owner = Annotated[str, Depends(user)]
 def check_admin(request: Request, owner: Owner):
     claims = getattr(request.state, "account_claims", {}) or {}
     email = (claims.get("email") or "").strip().casefold()
-    if not email and owner == "demo-student":
+    local_mode = request.app.state.services.settings.auth_mode == "local"
+    if local_mode and not email and owner == "demo-student":
         email = "demo@cdmento.local"
     settings_obj = getattr(request.app.state.services, "settings", settings)
     admin_emails = [
@@ -151,14 +153,25 @@ def check_admin(request: Request, owner: Owner):
         claims.get("admin") is True
         or claims.get("role") == "admin"
         or (email and email in admin_emails)
-        or profile.get("role") == "admin"
-        or owner == "demo-student"
+        or (profile.get("role") == "admin" and (owner != "demo-student" or local_mode))
+        or (local_mode and owner == "demo-student")
     ):
         return owner
     raise HTTPException(status_code=403, detail="Admin access required.")
 
 
 AdminOwner = Annotated[str, Depends(check_admin)]
+
+
+def client_ip(request: Request):
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if os.getenv("VERCEL") == "1" and forwarded:
+        for candidate in forwarded.split(","):
+            try:
+                return str(ipaddress.ip_address(candidate.strip()))
+            except ValueError:
+                continue
+    return request.client.host if request.client else "unknown"
 
 
 
@@ -222,16 +235,19 @@ def create_app(config=None, services=None):
             TrustedHostMiddleware,
             allowed_hosts=["127.0.0.1", "localhost", "testserver", "[::1]"],
         )
+    cors_origins = ["https://cdmento-study-7.vercel.app"]
+    if service.settings.auth_mode == "local":
+        cors_origins.extend(
+            [
+                "http://127.0.0.1:5173",
+                "http://localhost:5173",
+                "http://127.0.0.1:8000",
+                "http://localhost:8000",
+            ]
+        )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "https://cdmento-study-7.vercel.app",
-            "https://cdmento-study-7.vercel.app",
-            "http://127.0.0.1:5173",
-            "http://localhost:5173",
-            "http://127.0.0.1:8000",
-            "http://localhost:8000",
-        ],
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "Authorization", "X-CSRF-Token"],
@@ -596,7 +612,7 @@ def create_app(config=None, services=None):
                 for e in getattr(service.settings, "admin_emails", "").split(",")
                 if e.strip()
             ]
-            if email.strip().casefold() in admin_emails or email == "demo@cdmento.local":
+            if email.strip().casefold() in admin_emails:
                 role = "admin"
             repo.put(
                 "__system_admin__",
@@ -660,7 +676,8 @@ def create_app(config=None, services=None):
             if value.strip()
         }
         custom_claims = claims.get("admin") is True
-        role = previous.get("role", "student")
+        local_demo = service.settings.auth_mode == "local" and uid == "demo-student"
+        role = previous.get("role", "student") if uid != "demo-student" or local_demo else "student"
         if email in admin_emails or custom_claims:
             role = "admin"
         return repo.put(
@@ -1058,7 +1075,7 @@ def create_app(config=None, services=None):
     @app.post("/api/v1/auth/demo/login")
     def demo_login(data: S.DemoLogin, request: Request):
         auth = local_demo(request)
-        client = request.client.host if request.client else "127.0.0.1"
+        client = client_ip(request)
         try:
             res = auth.login(data.email, data.password, client)
             upsert_user_profile(
@@ -1082,13 +1099,13 @@ def create_app(config=None, services=None):
     @app.post("/api/v1/auth/google/prepare")
     def google_prepare(data: S.GoogleLogin, request: Request):
         auth = google_auth(request)
-        client = request.client.host if request.client else "unknown"
+        client = client_ip(request)
         return auth.prepare(data.credential, data.remember, client)
 
     @app.post("/api/v1/auth/google/register")
     def google_register(data: S.GoogleLogin, request: Request):
         auth = google_auth(request)
-        client = request.client.host if request.client else "unknown"
+        client = client_ip(request)
         result = auth.register(data.credential, data.remember, client)
         profile = result.get("profile", {})
         upsert_user_profile(
@@ -1104,7 +1121,7 @@ def create_app(config=None, services=None):
     @app.post("/api/v1/auth/google/login")
     def google_login(data: S.GoogleLogin, request: Request):
         auth = google_auth(request)
-        client = request.client.host if request.client else "unknown"
+        client = client_ip(request)
         try:
             res = auth.login(data.credential, data.remember, client)
             email = res.get("profile", {}).get("email") or "google-user"
@@ -1143,7 +1160,7 @@ def create_app(config=None, services=None):
     def email_signup(data: S.PasswordSignup, request: Request):
         if not app.state.brevo_mailer.configured:
             raise HTTPException(503, "Brevo email is not configured yet.")
-        client = request.client.host if request.client else "unknown"
+        client = client_ip(request)
         try:
             auth = email_auth(request)
             result = auth.signup(
@@ -1168,7 +1185,7 @@ def create_app(config=None, services=None):
 
     @app.post("/api/v1/auth/email/login")
     def email_login(data: S.PasswordLogin, request: Request):
-        client = request.client.host if request.client else "unknown"
+        client = client_ip(request)
         try:
             res = email_auth(request).login(
                 data.email, data.password, client, data.remember
@@ -1203,7 +1220,7 @@ def create_app(config=None, services=None):
     def request_password_reset(data: S.PasswordResetRequest, request: Request):
         if not app.state.brevo_mailer.configured:
             raise HTTPException(503, "Brevo email is not configured yet.")
-        client = request.client.host if request.client else "unknown"
+        client = client_ip(request)
         try:
             return email_auth(request).request_reset(data.email, client)
         except RuntimeError:
@@ -1270,7 +1287,11 @@ def create_app(config=None, services=None):
     def account_profile(request: Request, owner: Owner):
         claims = getattr(request.state, "account_claims", {}) or {}
         existing = repo.get(owner, "profile", "account") or {}
-        demo = app.state.demo_auth.profile() if owner == "demo-student" else {}
+        demo = (
+            app.state.demo_auth.profile()
+            if service.settings.auth_mode == "local" and owner == "demo-student"
+            else {}
+        )
         email = claims.get("email") or demo.get("email") or existing.get("email", "")
         if email:
             provider = claims.get("firebase", {}).get("sign_in_provider", "firebase")
@@ -1297,8 +1318,8 @@ def create_app(config=None, services=None):
             claims.get("admin") is True
             or claims.get("role") == "admin"
             or (email.strip().casefold() in admin_emails)
-            or (owner == "demo-student")
-            or (existing.get("role") == "admin")
+            or (service.settings.auth_mode == "local" and owner == "demo-student")
+            or (existing.get("role") == "admin" and (owner != "demo-student" or service.settings.auth_mode == "local"))
         )
         return {
             "display_name": claims.get("name") or demo.get("displayName") or "Student",
@@ -2749,15 +2770,6 @@ def create_app(config=None, services=None):
                     },
                     {
                         "id": identifier(),
-                        "email": "demo@cdmento.local",
-                        "role": "admin",
-                        "auth_method": "local-demo",
-                        "status": "success",
-                        "ip": "127.0.0.1",
-                        "timestamp": datetime.fromtimestamp(now_t - 3600, tz=timezone.utc).isoformat(),
-                    },
-                    {
-                        "id": identifier(),
                         "email": "student1@cdm.edu.ph",
                         "role": "student",
                         "auth_method": "google",
@@ -2847,7 +2859,6 @@ def create_app(config=None, services=None):
 
         seeded_access = {
             ("lozadamarklaurence226@gmail.com", "127.0.0.1"),
-            ("demo@cdmento.local", "127.0.0.1"),
             ("student1@cdm.edu.ph", "112.198.71.4"),
             ("unknown@malicious.com", "185.220.101.5"),
         }

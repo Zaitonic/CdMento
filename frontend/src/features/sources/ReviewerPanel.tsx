@@ -82,7 +82,7 @@ export default function ReviewerPanel({
       <AIAccess ai={a.ai} />
       <label>
         Coverage
-        <select value={coverage} onChange={(e) => setCoverage(e.target.value)}>
+        <select id="reviewer-coverage" name="coverage" value={coverage} onChange={(e) => setCoverage(e.target.value)}>
           <option value="whole">Whole selected source</option>
           <option value="pages" disabled={source?.type !== "pdf"}>
             Selected PDF pages
@@ -93,6 +93,8 @@ export default function ReviewerPanel({
         <label>
           Page range
           <input
+            id="reviewer-page-range"
+            name="page-range"
             value={range}
             onChange={(e) => setRange(e.target.value)}
             placeholder="e.g. 1-5, 8"
@@ -101,7 +103,7 @@ export default function ReviewerPanel({
       )}
       <label>
         Reviewer style
-        <select value={style} onChange={(e) => setStyle(e.target.value)}>
+        <select id="reviewer-style" name="style" value={style} onChange={(e) => setStyle(e.target.value)}>
           <option value="detailed">Detailed study guide</option>
           <option value="concise">Quick revision</option>
           <option value="questions">Questions & answers</option>
@@ -137,6 +139,8 @@ export default function ReviewerPanel({
         <label>
           Saved reviewers
           <select
+            id="saved-reviewer-picker"
+            name="saved-reviewer"
             value={a.active}
           onChange={(e) => { a.setActive(e.target.value); onOpen?.(); }}
           >
@@ -188,6 +192,8 @@ export default function ReviewerPanel({
             ).map(([key, label]) => (
               <label key={key}>
                 <input
+                  id={`reviewer-save-${key}`}
+                  name={`save-${key}`}
                   type="checkbox"
                   checked={saveOptions[key]}
                   onChange={() => toggleOption(key)}

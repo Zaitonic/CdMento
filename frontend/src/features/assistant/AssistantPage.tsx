@@ -357,6 +357,8 @@ export default function AssistantPage() {
     <section className="feature-screen assistant-screen">
       <div className="chat-toolbar">
         <select
+          id="chat-notebook-picker"
+          name="active-notebook"
           className="chat-notebook-picker"
           aria-label="Active notebook"
           value={s.active}
@@ -375,6 +377,8 @@ export default function AssistantPage() {
             {sources.map((source) => (
               <label key={source.id}>
                 <input
+                  id={`chat-source-${source.id}`}
+                  name="selected-sources"
                   type="checkbox"
                   disabled={source.status !== "ready"}
                   checked={source.status === "ready" && (s.selectedSources === null || s.selectedSources.includes(source.id))}
@@ -515,6 +519,9 @@ export default function AssistantPage() {
             }}
           >
             <input
+              id="assistant-question"
+              name="question"
+              autoComplete="off"
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
               maxLength={8000}

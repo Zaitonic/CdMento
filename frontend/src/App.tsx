@@ -354,6 +354,9 @@ export default function App() {
   return (
     <>
       <input
+        id="source-files-upload"
+        name="source-files"
+        aria-label="Upload study sources"
         ref={input}
         type="file"
         hidden
@@ -534,6 +537,8 @@ export default function App() {
               <label className="search">
                 <Search size={16} />
                 <input
+                  id="workspace-notebook-search"
+                  name="notebook-search"
                   ref={searchInput}
                   aria-label="Search notebooks"
                   placeholder="Search notebooks…"
@@ -731,6 +736,8 @@ export default function App() {
                     {sources.map((source) => (
                       <label key={source.id}>
                         <input
+                          id={`selected-source-${source.id}`}
+                          name="selected-sources"
                           type="checkbox"
                           disabled={source.status !== "ready"}
                           checked={
@@ -766,6 +773,8 @@ export default function App() {
                   <div className="active-notebook">
                     <FolderOpen size={14} />
                     <select
+                      id="active-notebook-picker"
+                      name="active-notebook"
                       aria-label="Active notebook"
                       value={s.active}
                       onChange={(e) => s.set({ active: e.target.value })}
@@ -915,6 +924,9 @@ export default function App() {
                     </button>
                   </div>
                   <select
+                    id="source-notebook-picker"
+                    name="source-notebook"
+                    aria-label="Source notebook"
                     value={s.active}
                     onChange={(e) => s.set({ active: e.target.value })}
                   >
@@ -1059,6 +1071,10 @@ export default function App() {
             </p>
             {modal.kind !== "delete" && (
               <input
+                id="workspace-item-name"
+                name="name"
+                aria-label={modal.kind === "source" ? "Source name" : "Notebook name"}
+                autoComplete="off"
                 autoFocus
                 maxLength={80}
                 placeholder="e.g. Introduction to Psychology"

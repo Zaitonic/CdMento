@@ -220,6 +220,8 @@ export default function SourcesPage({
           </button>
         ) : (
           <select
+            id="source-notebook-picker"
+            name="active-notebook"
             aria-label="Source notebook"
             value={s.active}
             onChange={(e) => s.set({ active: e.target.value })}
@@ -233,6 +235,9 @@ export default function SourcesPage({
         )}
       </div>
       <input
+        id="source-upload-input"
+        name="source-files"
+        aria-label="Upload source files"
         hidden
         ref={input}
         type="file"
@@ -289,6 +294,8 @@ export default function SourcesPage({
           <label className="source-search">
             <Search size={15} />
             <input
+              id="source-library-search"
+              name="source-search"
               aria-label="Search sources"
               placeholder="Find a source…"
               value={query}
@@ -674,6 +681,8 @@ export default function SourcesPage({
             <label>
               Source title
               <input
+                id="pasted-source-title"
+                name="title"
                 autoFocus
                 maxLength={150}
                 required
@@ -685,6 +694,8 @@ export default function SourcesPage({
             <label>
               Study material
               <textarea
+                id="pasted-source-text"
+                name="content"
                 required
                 maxLength={2000000}
                 rows={12}
@@ -738,6 +749,8 @@ export default function SourcesPage({
           >
             <h2>Rename source</h2>
             <input
+              id="renamed-source-title"
+              name="title"
               aria-label="Source name"
               autoFocus
               required

@@ -1,6 +1,6 @@
 // CdMento Progressive Web App Service Worker
 // Bump the version whenever the caching strategy changes so old caches purge.
-const CACHE_NAME = "cdmento-app-v4";
+const CACHE_NAME = "cdmento-app-v5";
 const STATIC_ASSETS = [
   "/",
   "/workspace",
@@ -41,6 +41,9 @@ self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
 
+  // Never intercept sign-in, fonts, or other third-party requests.
+  if (url.origin !== self.location.origin) return;
+
   // 1. Skip non-GET requests and browser extensions
   if (request.method !== "GET" || !url.protocol.startsWith("http")) {
     return;
@@ -68,7 +71,7 @@ self.addEventListener("fetch", (event) => {
       fetch(request, { cache: "no-store" }).catch(() => {
         return caches.match(request).then((cached) => {
           return cached || caches.match("/") || caches.match("/workspace");
-        });
+        }).catch(() => new Response("Offline", { status: 503 }));
       })
     );
     return;
@@ -82,9 +85,7 @@ self.addEventListener("fetch", (event) => {
         fetch(request)
           .then((networkResponse) => {
             if (networkResponse && networkResponse.status === 200) {
-              caches.open(CACHE_NAME).then((cache) => {
-                cache.put(request, networkResponse);
-              });
+              caches.open(CACHE_NAME).then((cache) => cache.put(request, networkResponse)).catch(() => {});
             }
           })
           .catch(() => {});
@@ -101,12 +102,10 @@ self.addEventListener("fetch", (event) => {
         }
 
         const responseToCache = networkResponse.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(request, responseToCache);
-        });
+        caches.open(CACHE_NAME).then((cache) => cache.put(request, responseToCache)).catch(() => {});
 
         return networkResponse;
-      });
+      }).catch(() => new Response("Offline", { status: 503 }));
     })
   );
 });

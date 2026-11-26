@@ -147,6 +147,8 @@ export default function ProfilePage() {
           <label>
             Display name
             <input
+              id="profile-display-name"
+              name="display_name"
               required
               maxLength={80}
               value={draft.display_name}
@@ -158,6 +160,8 @@ export default function ProfilePage() {
           <label>
             Bio
             <textarea
+              id="profile-bio"
+              name="bio"
               maxLength={300}
               rows={3}
               disabled={saving}
@@ -170,6 +174,8 @@ export default function ProfilePage() {
           <label>
             Study goal
             <input
+              id="profile-study-goal"
+              name="study_goal"
               maxLength={160}
               disabled={saving}
               value={draft.study_goal}

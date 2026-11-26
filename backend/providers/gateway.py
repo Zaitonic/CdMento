@@ -3,6 +3,7 @@
 import hashlib
 import json
 import logging
+import os
 import re
 import ssl
 import threading
@@ -73,7 +74,11 @@ def parse_extra_providers(raw, local_mode=False):
             if parsed.enabled:
                 result.append(parsed)
         except (TypeError, ValueError, ValidationError) as exc:
-            log.warning("Skipping extra AI provider at index %s: invalid configuration (%s)", index, exc)
+            log.warning(
+                "Skipping extra AI provider at index %s: invalid configuration (%s)",
+                index,
+                type(exc).__name__,
+            )
     return result
 
 
@@ -116,6 +121,8 @@ class OpenAICompatibleClient:
         max_tokens=2400,
         response_format=None,
         extra_payload=None,
+        timeout_seconds=None,
+        stream=False,
     ):
         payload = {
             "model": self.provider.model,
@@ -127,6 +134,8 @@ class OpenAICompatibleClient:
             payload["response_format"] = response_format
         if extra_payload:
             payload.update(extra_payload)
+        if stream:
+            payload["stream"] = True
         headers = {
             **(self.provider.extra_headers or {}),
             "Authorization": f"Bearer {self.provider.key}",
@@ -134,12 +143,56 @@ class OpenAICompatibleClient:
         with httpx.Client(
             transport=self.transport,
             timeout=httpx.Timeout(
-                self.provider.timeout_seconds,
-                connect=min(10, self.provider.timeout_seconds),
+                timeout_seconds or self.provider.timeout_seconds,
+                connect=min(10, timeout_seconds or self.provider.timeout_seconds),
             ),
             verify=ssl.create_default_context(),
             follow_redirects=False,
         ) as client:
+            if stream:
+                with client.stream(
+                    "POST",
+                    f"{self.provider.base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                ) as response:
+                    response_headers = dict(response.headers)
+                    if response.status_code != 200:
+                        return httpx.Response(
+                            response.status_code,
+                            headers=response_headers,
+                            content=response.read(),
+                        )
+                    content_type = response.headers.get("content-type", "")
+                    if "text/event-stream" not in content_type:
+                        return httpx.Response(
+                            response.status_code,
+                            headers=response_headers,
+                            content=response.read(),
+                        )
+                    content = []
+                    finish_reason = "stop"
+                    try:
+                        for line in response.iter_lines():
+                            if not line.startswith("data:"):
+                                continue
+                            event = line[5:].strip()
+                            if event == "[DONE]":
+                                break
+                            chunk = json.loads(event)
+                            choice = chunk.get("choices", [{}])[0]
+                            delta = choice.get("delta", {}).get("content", "")
+                            if delta:
+                                content.append(delta)
+                            if choice.get("finish_reason"):
+                                finish_reason = choice["finish_reason"]
+                    except (json.JSONDecodeError, IndexError, TypeError) as exc:
+                        raise httpx.DecodingError("Invalid OpenAI-compatible stream", request=response.request) from exc
+                    return httpx.Response(
+                        200,
+                        headers=response_headers,
+                        json={"choices": [{"finish_reason": finish_reason, "message": {"content": "".join(content)}}]},
+                    )
             return client.post(
                 f"{self.provider.base_url}/chat/completions",
                 headers=headers,
@@ -159,6 +212,7 @@ class Gateway:
         )
         self.lock = threading.RLock()
         self.providers = []
+        self.model_checks = {}
         self.problem = ""
         if not settings.ai_enabled:
             self.problem = "AI is disabled on this server."
@@ -180,29 +234,37 @@ class Gateway:
         if not settings.ai_free_tier_confirmed:
             self.problem = "Confirm unbilled/free-plan provider accounts in the server configuration first."
             return
-        if settings.freellmapi_api_key:
-            if not settings.freellmapi_free_tier_confirmed:
-                self.problem = "Confirm the router uses an unbilled Mistral free account before enabling it."
-                return
-            if settings.freellmapi_base_url != "http://127.0.0.1:3001/v1":
-                self.problem = (
-                    "The experimental router must use the approved loopback endpoint."
-                )
-                return
-            if settings.freellmapi_model != "ministral-8b-latest":
-                self.problem = "Use the tested pinned Mistral model; automatic cross-provider routing is not allowed."
-                return
-            self.providers.append(
-                Provider(
-                    "mistral",
-                    settings.freellmapi_model,
-                    settings.freellmapi_api_key,
-                    settings.ai_daily_requests,
-                    settings.freellmapi_base_url.rstrip("/"),
-                    {},
-                    settings.ai_request_timeout_seconds,
-                )
-            )
+        if settings.freellmapi_enabled:
+            if not settings.freellmapi_api_key:
+                log.warning("Skipping FreeLLMAPI: FREELLMAPI_API_KEY is missing")
+            elif not settings.freellmapi_model.strip():
+                log.warning("Skipping FreeLLMAPI: FREELLMAPI_MODEL is empty")
+            elif not settings.freellmapi_free_tier_confirmed:
+                log.warning("Skipping FreeLLMAPI: free-tier confirmation is required")
+            else:
+                parsed_url = urlsplit(settings.freellmapi_base_url.rstrip("/"))
+                local_router = parsed_url.hostname in {"localhost", "127.0.0.1"}
+                if parsed_url.scheme != "https" and not (
+                    settings.data_backend == "sqlite"
+                    and os.getenv("VERCEL") != "1"
+                    and parsed_url.scheme == "http"
+                    and local_router
+                ):
+                    log.warning("Skipping FreeLLMAPI: base URL must use HTTPS outside local development")
+                elif not parsed_url.hostname or parsed_url.username or parsed_url.password or parsed_url.query or parsed_url.fragment:
+                    log.warning("Skipping FreeLLMAPI: invalid base URL")
+                else:
+                    self.providers.append(
+                        Provider(
+                            "freellmapi",
+                            settings.freellmapi_model,
+                            settings.freellmapi_api_key,
+                            settings.ai_daily_requests,
+                            settings.freellmapi_base_url.rstrip("/"),
+                            {},
+                            settings.ai_request_timeout_seconds,
+                        )
+                    )
         if settings.groq_api_key:
             if settings.groq_model not in {"openai/gpt-oss-120b", "openai/gpt-oss-20b"}:
                 self.problem = "Groq model is outside the approved free-plan allowlist."
@@ -324,7 +386,7 @@ class Gateway:
 
         for _ in range(8):
             value = self.state(provider)
-            if value.get("disabled") or value.get("retry_at", 0) > self.clock():
+            if value.get("retry_at", 0) > self.clock():
                 return False
             if value.get("used", 0) >= provider.daily_limit:
                 return False
@@ -332,7 +394,7 @@ class Gateway:
                 self.repo.put(
                     self.OWNER,
                     "providers",
-                    {**value, "used": value.get("used", 0) + 1},
+                    {**value, "used": value.get("used", 0) + 1, "disabled": False},
                     expected=value.get("revision", 0),
                 )
                 return True
@@ -363,20 +425,49 @@ class Gateway:
             except Conflict:
                 continue
 
+    def record_health(self, provider, *, latency_ms=None, status=None, failure=None):
+        from ..repository import Conflict
+
+        for _ in range(8):
+            value = self.state(provider)
+            update = {
+                **value,
+                "health": "unavailable" if failure else "healthy",
+                "last_status": status,
+                "failure_count": value.get("failure_count", 0) + 1 if failure else 0,
+            }
+            if latency_ms is not None:
+                update["last_latency_ms"] = latency_ms
+            if failure:
+                update["failure_reason"] = failure
+            else:
+                update.pop("failure_reason", None)
+                update.pop("retry_at", None)
+                update["disabled"] = False
+            try:
+                self.repo.put(self.OWNER, "providers", update, expected=value.get("revision", 0))
+                return
+            except Conflict:
+                continue
+
     def status(self):
         providers = []
         for p in self.providers if self.configured else []:
             value = self.state(p)
-            providers.append(
-                {
+            provider_status = {
                     "name": p.name,
                     "model": p.model,
                     "requests_used": value.get("used", 0),
                     "daily_cap": p.daily_limit,
                     "retry_at": value.get("retry_at"),
-                    "disabled": bool(value.get("disabled")),
+                    "disabled": bool(value.get("disabled") and value.get("retry_at", 0) > self.clock()),
+                    "health": value.get("health", "unknown"),
+                    "failure_count": value.get("failure_count", 0),
+                    "last_latency_ms": value.get("last_latency_ms"),
                 }
-            )
+            if p.name == "freellmapi" and (p.base_url, p.model) in self.model_checks:
+                provider_status["model_verified"] = self.model_checks[(p.base_url, p.model)][1]
+            providers.append(provider_status)
         state = "unconfigured"
         message = self.problem
         retry_at = None
@@ -429,14 +520,15 @@ class Gateway:
             except (ValueError, TypeError, OverflowError):
                 return 60
 
-    def request(self, provider, instructions, prompt, schema=None, max_tokens=None):
+    def request(self, provider, instructions, prompt, schema=None, max_tokens=None, timeout_seconds=None):
         max_tokens = max_tokens or self.settings.ai_max_output_tokens
+        deadline = time.monotonic() + timeout_seconds if timeout_seconds else None
         messages = [
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": prompt},
             ]
         response_format = {"type": "json_object"}
-        if provider.name == "mistral" and schema is not None:
+        if provider.name == "freellmapi" and schema is not None:
             strict_schema = schema.model_json_schema()
 
             def require_fields(node):
@@ -459,6 +551,20 @@ class Gateway:
                     "schema": strict_schema,
                 },
             }
+        if provider.name == "freellmapi":
+            model_key = (provider.base_url, provider.model)
+            model_check = self.model_checks.get(model_key)
+            if model_check is None or time.monotonic() - model_check[0] >= 300:
+                model_available = self.check_model(provider, timeout_seconds)
+                self.model_checks[model_key] = (time.monotonic(), model_available)
+            else:
+                model_available = model_check[1]
+            if model_available is False:
+                return httpx.Response(404, json={"error": "Configured model is unavailable"})
+            if deadline is not None:
+                timeout_seconds = deadline - time.monotonic()
+                if timeout_seconds <= 0:
+                    return httpx.Response(408, json={"error": "Provider timeout"})
         extra_payload = {}
         if provider.name == "groq":
             extra_payload["reasoning_effort"] = "low"
@@ -473,7 +579,33 @@ class Gateway:
             max_tokens=max_tokens,
             response_format=response_format,
             extra_payload=extra_payload,
+            timeout_seconds=timeout_seconds,
+            stream=provider.name == "freellmapi",
         )
+
+    def check_model(self, provider, timeout_seconds=None):
+        """Return availability when /models is supported, otherwise leave it unverified."""
+        client_timeout = min(5, timeout_seconds or provider.timeout_seconds)
+        headers = {"Authorization": f"Bearer {provider.key}"}
+        try:
+            with httpx.Client(
+                transport=self.transport,
+                timeout=httpx.Timeout(client_timeout, connect=min(3, client_timeout)),
+                verify=ssl.create_default_context(),
+                follow_redirects=False,
+            ) as client:
+                response = client.get(f"{provider.base_url}/models", headers=headers)
+            if response.status_code != 200:
+                return None
+            models = response.json().get("data")
+            if not isinstance(models, list):
+                return None
+            return provider.model == "auto" or any(
+                isinstance(model, dict) and model.get("id") == provider.model
+                for model in models
+            )
+        except (httpx.HTTPError, ValueError, TypeError):
+            return None
 
     def complete(self, schema, system, prompt, validate=None, max_tokens=None):
         self.require()
@@ -492,7 +624,8 @@ class Gateway:
         started = self.clock()
         attempts = 0
         for p in self.providers:
-            if attempts >= self.settings.ai_max_failover_attempts or self.clock() - started >= self.settings.ai_request_timeout_seconds:
+            remaining = self.settings.ai_request_timeout_seconds - (self.clock() - started)
+            if attempts >= self.settings.ai_max_failover_attempts or remaining <= 0:
                 break
             if check and not check(p.name):
                 continue
@@ -507,31 +640,48 @@ class Gateway:
                         )
                     )
                     continue
+            provider_started = self.clock()
             try:
                 attempts += 1
-                response = self.request(p, instructions, prompt, schema, max_tokens)
+                response = self.request(
+                    p,
+                    instructions,
+                    prompt,
+                    schema,
+                    max_tokens,
+                    timeout_seconds=max(1, min(p.timeout_seconds, remaining)),
+                )
             except httpx.HTTPError:
-                self.cooldown(p, 60)
+                self.record_health(
+                    p,
+                    latency_ms=round((self.clock() - provider_started) * 1000),
+                    failure="network",
+                )
+                self.cooldown(p, 60, reason="network")
                 retry.append(60)
                 continue
             if response.status_code in (401, 403):
-                self.cooldown(p, 300, disabled=True)
+                self.record_health(p, latency_ms=round((self.clock() - provider_started) * 1000), status=response.status_code, failure="authentication")
+                self.cooldown(p, 300, reason="authentication")
                 retry.append(300)
                 continue
             if response.status_code == 429 or response.status_code >= 500:
                 seconds = self.retry_seconds(response)
+                self.record_health(p, latency_ms=round((self.clock() - provider_started) * 1000), status=response.status_code, failure="upstream")
                 self.cooldown(p, seconds)
                 retry.append(seconds)
                 continue
             if response.status_code != 200:
                 # Never expose provider error bodies (which may echo credentials/prompts).
-                self.cooldown(p, 300)
+                self.record_health(p, latency_ms=round((self.clock() - provider_started) * 1000), status=response.status_code, failure="upstream")
+                self.cooldown(p, 300, reason="upstream")
                 retry.append(300)
                 continue
             try:
                 data = response.json()
                 choice = data["choices"][0]
                 if choice.get("finish_reason") == "content_filter":
+                    self.record_health(p, latency_ms=round((self.clock() - provider_started) * 1000), status=response.status_code)
                     raise AIRefused(
                         "The provider declined this request. Try a different study question."
                     )
@@ -542,11 +692,17 @@ class Gateway:
                 if validate:
                     validate(result)
                 result["_ai"] = {"provider": p.name, "model": p.model}
+                self.record_health(
+                    p,
+                    latency_ms=round((self.clock() - provider_started) * 1000),
+                    status=response.status_code,
+                )
                 return result
             except AIRefused:
                 raise
             except (ValueError, ValidationError, KeyError, IndexError, TypeError):
                 invalid_output = True
+                self.record_health(p, latency_ms=round((self.clock() - provider_started) * 1000), status=response.status_code, failure="invalid_output")
                 self.cooldown(p, 15, reason="invalid_output")
                 retry.append(15)
         if invalid_output:

@@ -193,6 +193,8 @@ export default function Flashcards() {
               <label>
                 Question
                 <textarea
+                  id="flashcard-edit-question"
+                  name="question"
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
                 />
@@ -200,6 +202,8 @@ export default function Flashcards() {
               <label>
                 Answer
                 <textarea
+                  id="flashcard-edit-answer"
+                  name="answer"
                   value={answer}
                   onChange={(e) => setAnswer(e.target.value)}
                 />
@@ -352,8 +356,10 @@ export default function Flashcards() {
               </div>
               {wizardStep === 0 ? (
                 <div className="wizard-step-content">
-                  <label className="field-label">Deck title</label>
+                  <label className="field-label" htmlFor="flashcard-deck-title">Deck title</label>
                   <input
+                    id="flashcard-deck-title"
+                    name="title"
                     className="field-input"
                     value={deckTitle}
                     onChange={(e) => setDeckTitle(e.target.value)}
@@ -389,8 +395,10 @@ export default function Flashcards() {
                   </p>
                   <div className="card-form-row">
                     <div className="input-group">
-                      <label className="field-label">Question</label>
+                      <label className="field-label" htmlFor="flashcard-new-question">Question</label>
                       <input
+                        id="flashcard-new-question"
+                        name="question"
                         className="field-input"
                         value={newCardQ}
                         onChange={(e) => setNewCardQ(e.target.value)}
@@ -398,8 +406,10 @@ export default function Flashcards() {
                       />
                     </div>
                     <div className="input-group">
-                      <label className="field-label">Answer</label>
+                      <label className="field-label" htmlFor="flashcard-new-answer">Answer</label>
                       <input
+                        id="flashcard-new-answer"
+                        name="answer"
                         className="field-input"
                         value={newCardA}
                         onChange={(e) => setNewCardA(e.target.value)}
@@ -407,8 +417,10 @@ export default function Flashcards() {
                       />
                     </div>
                     <div className="input-group">
-                      <label className="field-label">Concept</label>
+                      <label className="field-label" htmlFor="flashcard-new-concept">Concept</label>
                       <input
+                        id="flashcard-new-concept"
+                        name="concept"
                         className="field-input"
                         value={newCardConcept}
                         onChange={(e) => setNewCardConcept(e.target.value)}

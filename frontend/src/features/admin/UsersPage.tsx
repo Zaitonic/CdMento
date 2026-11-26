@@ -307,6 +307,9 @@ export const UsersPage = () => {
         <div className="admin-search">
           <Search size={16} />
           <input
+            id="admin-user-search"
+            name="user-search"
+            aria-label="Search users"
             type="text"
             placeholder="Search by email, name, or UID..."
             value={search}
@@ -314,6 +317,9 @@ export const UsersPage = () => {
           />
         </div>
         <select
+          id="admin-user-role-filter"
+          name="role-filter"
+          aria-label="Filter users by role"
           value={roleFilter}
           onChange={(e) => setRoleFilter(e.target.value)}
           className="admin-filter-select"
@@ -323,6 +329,9 @@ export const UsersPage = () => {
           <option value="student">Student</option>
         </select>
         <select
+          id="admin-user-provider-filter"
+          name="provider-filter"
+          aria-label="Filter users by provider"
           value={providerFilter}
           onChange={(e) => setProviderFilter(e.target.value)}
           className="admin-filter-select"
@@ -334,6 +343,9 @@ export const UsersPage = () => {
           <option value="firebase">Firebase</option>
         </select>
         <select
+          id="admin-user-status-filter"
+          name="status-filter"
+          aria-label="Filter users by status"
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}
           className="admin-filter-select"

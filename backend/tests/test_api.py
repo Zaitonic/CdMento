@@ -773,6 +773,64 @@ def test_account_profile_uses_verified_claims_and_is_owner_scoped(env, monkeypat
     assert services.repo.get("bob", "profile", "account")["email"] == "bob@example.com"
 
 
+def test_demo_student_is_not_an_admin_outside_local_mode(env, monkeypatch):
+    client, services, app = env
+    from firebase_admin import auth
+
+    services.settings.auth_mode = "firebase"
+    services.settings.admin_emails = "owner@example.com"
+    services.repo.put("demo-student", "profile", {"id": "account", "role": "admin"})
+    app.dependency_overrides.clear()
+    monkeypatch.setattr(
+        auth,
+        "verify_id_token",
+        lambda token, **kwargs: {"uid": token, "email_verified": True},
+    )
+    response = client.get(
+        "/api/v1/admin/users",
+        headers={"Authorization": "Bearer demo-student"},
+    )
+    assert response.status_code == 403
+
+
+def test_cors_local_origins_are_only_enabled_in_local_mode(env):
+    _, services, _ = env
+    services.settings.auth_mode = "firebase"
+    from backend.main import create_app
+
+    with TestClient(create_app(services=services)) as client:
+        response = client.options(
+            "/api/v1/health",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_client_ip_uses_forwarding_only_in_vercel(monkeypatch):
+    from starlette.requests import Request
+    from backend.main import client_ip
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [(b"x-forwarded-for", b"198.51.100.7, 10.0.0.2")],
+            "client": ("127.0.0.1", 1234),
+            "server": ("testserver", 80),
+            "scheme": "http",
+            "query_string": b"",
+        }
+    )
+    monkeypatch.setenv("VERCEL", "1")
+    assert client_ip(request) == "198.51.100.7"
+    monkeypatch.delenv("VERCEL")
+    assert client_ip(request) == "127.0.0.1"
+
+
 def test_queued_upload_survives_repository_reopen(env):
     client, services, _ = env
     n = client.post("/api/v1/notebooks", json={"name": "Restart check"}).json()

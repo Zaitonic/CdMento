@@ -126,6 +126,8 @@ export default function MindMap() {
       )}
       <div className="map-toolbar">
         <input
+          id="mindmap-new-concept"
+          name="new-concept"
           aria-label="New concept"
           placeholder="Add a concept…"
           value={label}
@@ -222,6 +224,8 @@ export default function MindMap() {
       {node && (
         <div className="selected-concept">
           <input
+            id="mindmap-concept-label"
+            name="concept-label"
             aria-label="Concept label"
             value={String(node.data.label)}
             onChange={(e) => {

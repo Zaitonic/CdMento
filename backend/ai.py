@@ -464,15 +464,6 @@ class AIService:
         return {"brief": result, "support": brief_support(result), "_ai": ai}
 
     def reviewer(self, request, sources, checkpoint=None, save_checkpoint=None):
-        if any(p.name == "mistral" for p in self.gateway.providers):
-            approved = [p.name for p in self.gateway.providers if p.name != "mistral"]
-            if not approved:
-                raise ValueError(
-                    "Reviewers need another approved AI provider. The local Mistral model has not passed reviewer accuracy checks."
-                )
-            return self.request_scope(
-                approved, getattr(self.gateway, "permission_check", None)
-            ).reviewer(request, sources, checkpoint, save_checkpoint)
         pages = request.get("pages")
         units = source_units(sources, pages)
         if not units:
