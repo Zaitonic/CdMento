@@ -105,6 +105,7 @@ export default function MentoSearchPage() {
   const [papersError, setPapersError] = useState('');
   const [failedSources, setFailedSources] = useState<string[]>([]);
   const [sourceMessages, setSourceMessages] = useState<string[]>([]);
+  const [successfulSourcesCount, setSuccessfulSourcesCount] = useState(0);
   const currentYear = new Date().getFullYear();
   const [yearFromInput, setYearFromInput] = useState('');
   const [yearToInput, setYearToInput] = useState('');
@@ -140,12 +141,14 @@ export default function MentoSearchPage() {
     setPapersError('');
     setFailedSources([]);
     setSourceMessages([]);
+    setSuccessfulSourcesCount(0);
     try {
       const outcome = await runMentoSearch(q, sourcePreferences, controller.signal, 30_000, from, to, prefs.sort);
       if (controller.signal.aborted) return [];
       setPapers(outcome.results);
       setFailedSources(outcome.failedSources);
       setSourceMessages(outcome.sourceMessages ?? []);
+      setSuccessfulSourcesCount(outcome.succeededCount);
       return outcome.results;
     } catch (err) {
       if (!controller.signal.aborted) {
@@ -648,6 +651,7 @@ export default function MentoSearchPage() {
         ? [...papers].sort((a, b) => (b.year ?? 0) - (a.year ?? 0))
         : papers;
     const uniqueSourceMessages = [...new Set(sourceMessages)];
+    const showFailureBanner = successfulSourcesCount === 0 && failedSources.length > 0 && sorted.length === 0;
     const unreportedFailedSources = failedSources.filter(
       (name) => !sourceMessages.some((message) => message.startsWith(name)),
     );
@@ -657,12 +661,12 @@ export default function MentoSearchPage() {
     const usefulSourceMessages = uniqueSourceMessages.filter((message) =>
       !(hasGenericFailure && unreportedFailedSources.length > 0 && /^this source is unavailable right now\.?$/i.test(message.trim())),
     );
-    const noticeMessages = [
+    const noticeMessages = showFailureBanner ? [
       ...usefulSourceMessages,
       ...(unreportedFailedSources.length > 0
-        ? [`${unreportedFailedSources.join(', ')} ${unreportedFailedSources.length === 1 ? 'is' : 'are'} unavailable right now. Results from other sources are shown.`]
+        ? [`${unreportedFailedSources.join(', ')} ${unreportedFailedSources.length === 1 ? 'is' : 'are'} unavailable right now.`]
         : []),
-    ];
+    ] : [];
     content = (
       <>
         {noticeMessages.length > 0 && (
@@ -735,8 +739,7 @@ export default function MentoSearchPage() {
         ) : (
           <div className="empty-state">
             <p>
-              {failedSources.length > 0 &&
-              failedSources.length >= sourcePreferences.size
+              {showFailureBanner
                 ? 'The selected sources are unavailable right now. Try again in a moment.'
                 : 'No papers found. Try different keywords or enable more sources.'}
             </p>

@@ -391,7 +391,7 @@ export const SOURCES: SourceConfig[] = [
     id: "google_scholar",
     name: "Google Scholar",
     description: "Searches Google Scholar through a server-side SerpApi or Serper key",
-    defaultEnabled: false,
+    defaultEnabled: true,
     search: searchGoogleScholar,
   },
   {
@@ -419,14 +419,14 @@ export const SOURCES: SourceConfig[] = [
     id: "arxiv",
     name: "arXiv",
     description: "Open-access preprints",
-    defaultEnabled: false,
+    defaultEnabled: true,
     search: searchArxiv,
   },
   {
     id: "pubmed",
     name: "PubMed",
     description: "Biomedical and life-science literature",
-    defaultEnabled: false,
+    defaultEnabled: true,
     search: (query, signal, timeout, from, to, sort) => searchServerSource("pubmed", "PubMed", query, signal, timeout, from, to, sort, searchPubMed),
   },
   {

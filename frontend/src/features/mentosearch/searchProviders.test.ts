@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runMentoSearch } from "./searchProviders";
+import { runMentoSearch, SOURCES } from "./searchProviders";
 
 const semanticPayload = {
   data: [
@@ -128,6 +128,13 @@ afterEach(() => {
 });
 
 describe("MentoSearch providers", () => {
+  it("enables the six reliable sources by default and leaves Semantic Scholar optional", () => {
+    expect(SOURCES.filter((source) => source.defaultEnabled).map((source) => source.id)).toEqual([
+      "google_scholar", "crossref", "openalex", "arxiv", "pubmed", "europepmc",
+    ]);
+    expect(SOURCES.find((source) => source.id === "semantic")?.defaultEnabled).toBe(false);
+  });
+
   it("merges, deduplicates, and interleaves results from enabled sources", async () => {
     const outcome = await runMentoSearch(
       "spaced repetition",
